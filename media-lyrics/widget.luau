@@ -14,18 +14,123 @@ local SCROLL_TICKS = 4             -- advance one char every N update ticks (wit
 
 local GLYPHS = { " ", "⡀", "⣀", "⣄", "⣤", "⣦", "⣶", "⣷", "⣿" }
 
-local function readAudioWaves()
+local hostSpectrumLevels = nil
+local hostSpectrumTime = 0
+
+local function readCavaLevels()
   local ok, content = pcall(function() return noctalia.readFile("/dev/shm/cava_bars") end)
-  if not ok or not content or content == "" then return "" end
+  if not ok or not content or content == "" then return nil end
   local out = {}
   for num in content:gmatch("(%d+);") do
     local v = tonumber(num) or 0
-    local idx = math.min(#GLYPHS, math.max(1, v + 1))
-    out[#out + 1] = GLYPHS[idx]
-    if #out >= 5 then break end
+    out[#out + 1] = math.min(1.0, math.max(0.0, v / 7.0))
+    if #out >= 6 then break end
   end
-  if #out == 0 then return "" end
-  return table.concat(out)
+  if #out == 0 then return nil end
+  return out
+end
+
+local function getActiveLevels(playing)
+  if not playing then return nil end
+  local nowMs = 0
+  pcall(function() nowMs = noctalia.nowMs() end)
+  if hostSpectrumLevels and (nowMs - hostSpectrumTime) < 300 then
+    return hostSpectrumLevels
+  end
+  return readCavaLevels()
+end
+
+local function computeRhythmSig(levels, playing)
+  if not playing or not levels or #levels == 0 then return "idle" end
+  local parts = {}
+  for _, v in ipairs(levels) do
+    parts[#parts + 1] = tostring(math.floor(v * 7 + 0.5))
+  end
+  return table.concat(parts, ";")
+end
+
+-- Ambient audio visualizer background node (rendered after lyrics)
+local function buildRhythmNode(levels, playing, o)
+  if not playing or not levels or #levels == 0 then return nil end
+  local style = o.rhythmStyle or "bars"
+  if style == "none" then return nil end
+
+  local sum = 0
+  for _, v in ipairs(levels) do sum = sum + v end
+  local avgEnergy = sum / #levels
+  local isSilent = avgEnergy < 0.02
+
+  if style == "wave" then
+    return ui.row({
+      key = "rhythm_capsule",
+      align = "center",
+      height = 16,
+      paddingH = 4,
+      paddingV = 1,
+      radius = 8,
+      fill = "surface_variant/0.5",
+    }, {
+      ui.graph({
+        key = "rhythm_graph",
+        values = levels,
+        width = 34,
+        height = 12,
+        color = "primary",
+        lineWidth = 1.5,
+        fillOpacity = 0.35,
+      })
+    })
+  elseif style == "dots" then
+    local chars = {}
+    for _, v in ipairs(levels) do
+      local idx = math.min(#GLYPHS, math.max(1, math.floor(v * (#GLYPHS - 1)) + 1))
+      chars[#chars + 1] = GLYPHS[idx]
+    end
+    return ui.row({
+      key = "rhythm_capsule",
+      align = "center",
+      height = 16,
+      paddingH = 5,
+      paddingV = 2,
+      radius = 8,
+      fill = "surface_variant/0.5",
+    }, {
+      ui.label({
+        key = "rhythm_dots",
+        text = table.concat(chars),
+        fontSize = FONT_PX - 1,
+        color = "primary",
+        opacity = isSilent and 0.35 or 0.85,
+      })
+    })
+  else
+    -- Default: "bars" — elegant rounded equalizer bars inside background capsule
+    local bars = {}
+    local maxH = 12
+    local minH = 2
+    for i, lvl in ipairs(levels) do
+      local h = isSilent and minH or math.floor(minH + lvl * (maxH - minH) + 0.5)
+      local op = isSilent and 0.35 or (0.5 + lvl * 0.5)
+      bars[#bars + 1] = ui.box({
+        key = "rb_" .. i,
+        width = 2,
+        height = h,
+        radius = 1,
+        fill = "primary",
+        opacity = op,
+      })
+    end
+    return ui.row({
+      key = "rhythm_capsule",
+      align = "center",
+      height = 16,
+      paddingH = 5,
+      paddingV = 2,
+      radius = 8,
+      fill = "surface_variant/0.5",
+      gap = 2,
+    }, bars)
+  end
 end
 
 -- Which panel preset to open (panel_size plugin setting).
@@ -66,6 +171,7 @@ local function widgetOptions()
     artSize = math.max(8, math.min(96, cfgInt("art_size", 16))),
     scroll = scroll,
     hideWhenNoMedia = cfgBool("hide_when_no_media", false),
+    rhythmStyle = noctalia.getConfig("rhythm_style") or "bars",
   }
 end
 
@@ -118,7 +224,6 @@ local scrollOffset = 0
 local scrollTick = 0
 local hovered = false
 local lastFull = ""
-local currentWave = ""
 
 local function activeLyricLine(m)
   if m == nil then return nil end
@@ -194,12 +299,14 @@ end
 -- ── render ──────────────────────────────────────────────────────────────────
 
 local lastKey = ""
-local function renderKey(m, o, shown, wave)
+local lastRhythmSig = ""
+
+local function renderKey(m, o, shown, rhythmSig)
   return table.concat({
     m.hasPlayer and "1" or "0",
     tostring(m.playing),
     shown,
-    wave or "",
+    rhythmSig or "",
     m.artUrl or "",
     (type(m.artUrl) == "string" and m.artUrl ~= "" and noctalia.fileExists(m.artUrl)) and "1" or "0",
     tostring(o.artOnly),
@@ -207,6 +314,7 @@ local function renderKey(m, o, shown, wave)
     tostring(o.hideArtist),
     tostring(o.artistFirst),
     tostring(o.artSize),
+    tostring(o.rhythmStyle),
     barWidget.isVertical() and "V" or "H",
   }, "|")
 end
@@ -275,10 +383,13 @@ local function renderFrom(m, force)
     scrollTick = 0
   end
 
-  local wave = m.playing and currentWave or ""
+  local levels = m.playing and getActiveLevels(m.playing) or nil
+  local rhythmSig = computeRhythmSig(levels, m.playing)
+  local rhythmActive = levels and #levels > 0 and o.rhythmStyle ~= "none"
+
   local iconW = (not o.hideArt) and (o.artSize + GAP) or 0
-  local waveW = wave ~= "" and (charCount(wave) * CHAR_PX + GAP) or 0
-  local budget = math.max(8, math.floor((o.maxLength - iconW - waveW) / CHAR_PX))
+  local rhythmW = rhythmActive and (36 + GAP) or 0
+  local budget = math.max(8, math.floor((o.maxLength - iconW - rhythmW) / CHAR_PX))
 
   local overBudget = charCount(full) > budget
   local scrolling = overBudget and
@@ -295,7 +406,7 @@ local function renderFrom(m, force)
     shown = full
   end
 
-  local key = renderKey(m, o, shown, wave)
+  local key = renderKey(m, o, shown, rhythmSig)
   if not force and key == lastKey then return end
   lastKey = key
 
@@ -315,6 +426,9 @@ local function renderFrom(m, force)
   local textNode = ui.row({
     key = "textwrap",
     align = "center",
+    paddingH = 4,
+    paddingV = 1,
+    radius = 6,
     onHover = function(state)
       local h = (state == "true")
       if h ~= hovered then
@@ -325,18 +439,29 @@ local function renderFrom(m, force)
   }, { label })
   children[#children + 1] = textNode
 
-  -- Ambient audio visualizer wave (rendered after lyrics as background rhythm)
-  if wave ~= "" then
-    children[#children + 1] = ui.label({
-      key = "wave",
-      text = wave,
-      fontSize = FONT_PX - 1,
-      color = "primary",
-      opacity = 0.55,
-    })
+  -- Ambient audio visualizer background node (rendered after lyrics)
+  local rhythm = buildRhythmNode(levels, m.playing, o)
+  if rhythm then
+    children[#children + 1] = rhythm
   end
 
   barWidget.render(ui.row({ gap = GAP, align = "center" }, children))
+end
+
+-- ── audio spectrum entry point (Host PipeWire monitor) ───────────────────────
+
+function onAudioSpectrum(valuesCsv, stateCsv)
+  local out = {}
+  for v in string.gmatch(valuesCsv or "", "[^,]+") do
+    local n = tonumber(v)
+    if n then out[#out + 1] = math.min(1.0, math.max(0.0, n)) end
+    if #out >= 6 then break end
+  end
+  if #out > 0 then
+    hostSpectrumLevels = out
+    pcall(function() hostSpectrumTime = noctalia.nowMs() end)
+    renderFrom(media(), true)
+  end
 end
 
 -- ── loop ────────────────────────────────────────────────────────────────────
@@ -354,16 +479,18 @@ function update()
     return
   end
 
-  local wave = m.playing and readAudioWaves() or ""
-  local waveChanged = (wave ~= currentWave)
-  if waveChanged then
-    currentWave = wave
+  local levels = m.playing and getActiveLevels(m.playing) or nil
+  local rhythmSig = computeRhythmSig(levels, m.playing)
+  local rhythmChanged = (rhythmSig ~= lastRhythmSig)
+  if rhythmChanged then
+    lastRhythmSig = rhythmSig
   end
 
   local full = buildFull(m, o)
   local iconW = (not o.hideArt) and (o.artSize + GAP) or 0
-  local waveW = wave ~= "" and (charCount(wave) * CHAR_PX + GAP) or 0
-  local budget = math.max(8, math.floor((o.maxLength - iconW - waveW) / CHAR_PX))
+  local rhythmActive = levels and #levels > 0 and o.rhythmStyle ~= "none"
+  local rhythmW = rhythmActive and (36 + GAP) or 0
+  local budget = math.max(8, math.floor((o.maxLength - iconW - rhythmW) / CHAR_PX))
   local active = charCount(full) > budget and
     (o.scroll == "always" or (o.scroll == "on_hover" and hovered))
 
@@ -376,7 +503,7 @@ function update()
     end
   end
 
-  if waveChanged or scrollStep or full ~= lastFull then
+  if rhythmChanged or scrollStep or full ~= lastFull then
     renderFrom(m, true)
   end
 end

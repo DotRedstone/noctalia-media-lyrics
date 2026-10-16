@@ -125,6 +125,16 @@
         "on_hover": "On hover"
       }
     },
+    "rhythm_style": {
+      "description": "Visual style of the reactive rhythm background behind lyrics.",
+      "label": "Rhythm background effect",
+      "options": {
+        "bars": "Equalizer bars capsule",
+        "wave": "Smooth waveform curve",
+        "dots": "Rhythm dot matrix",
+        "none": "Off"
+      }
+    },
     "use_cache": {
       "description": "Store fetched lyrics in the plugin data directory for offline reuse.",
       "label": "Cache lyrics"

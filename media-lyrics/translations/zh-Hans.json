@@ -96,6 +96,16 @@
         "on_hover": "鼠标悬停时滚动"
       }
     },
+    "rhythm_style": {
+      "description": "顶栏歌词后方音频律动背景的视觉样式。",
+      "label": "律动背景效果",
+      "options": {
+        "bars": "柱状频谱胶囊",
+        "wave": "声波平滑曲线",
+        "dots": "律动点阵",
+        "none": "关闭"
+      }
+    },
     "use_cache": {
       "description": "将在线获取的歌词缓存到本地，便于离线回放时复用。",
       "label": "缓存歌词"
