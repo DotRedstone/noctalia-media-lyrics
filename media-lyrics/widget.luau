@@ -49,61 +49,67 @@ local function computeRhythmSig(levels, playing)
   return table.concat(parts, ";")
 end
 
--- Cosine interpolation to generate a smooth, organic audio waveform curve
-local function smoothCurve(rawLevels, targetPoints)
-  targetPoints = targetPoints or 28
-  if not rawLevels or #rawLevels == 0 then
-    local zeros = {}
-    for i = 1, targetPoints do zeros[i] = 0 end
-    return zeros
-  end
+local svgFlip = 0
 
-  local pts = { 0 }
-  for _, v in ipairs(rawLevels) do
-    pts[#pts + 1] = v
-  end
-  pts[#pts + 1] = 0
-
-  local n = #pts
-  local result = {}
-  local step = (n - 1) / (targetPoints - 1)
-
-  for i = 0, targetPoints - 1 do
-    local pos = i * step + 1
-    local idx1 = math.floor(pos)
-    local idx2 = math.min(n, idx1 + 1)
-    local mu = pos - idx1
-    local mu2 = (1 - math.cos(mu * math.pi)) / 2
-    local val = pts[idx1] * (1 - mu2) + pts[idx2] * mu2
-    result[#result + 1] = math.min(1.0, math.max(0.0, val))
-  end
-  return result
+local function xmlEscape(str)
+  return str:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
 end
 
--- Secondary layered wave with phase lag for depth
-local function companionCurve(curve)
-  local out = {}
-  for i, v in ipairs(curve) do
-    local lag = math.max(1, i - 2)
-    out[#out + 1] = math.min(1.0, math.max(0.0, v * 0.55 + (curve[lag] or 0) * 0.35))
+-- Generate a real dual-layer SVG: Layer 1 is the mirrored audio wave, Layer 2 is the sharp lyric text
+local function generateMirroredWaveSvg(text, levels, width, height)
+  local cy = height / 2.0
+  local rawAmps = { 0 }
+  if levels and #levels > 0 then
+    for i = 1, math.min(6, #levels) do
+      rawAmps[#rawAmps + 1] = levels[i]
+    end
+  else
+    for i = 1, 6 do rawAmps[#rawAmps + 1] = 0 end
   end
-  return out
-end
+  rawAmps[#rawAmps + 1] = 0
 
-local function buildWaveGraph(levels, width, height)
-  local c1 = smoothCurve(levels, 28)
-  local c2 = companionCurve(c1)
-  return ui.graph({
-    key = "rhythm_curve",
-    values = c1,
-    values2 = c2,
-    width = width,
-    height = height,
-    color = "primary",
-    color2 = "secondary",
-    lineWidth = 1.2,
-    fillOpacity = 0.28,
-  })
+  local nPts = #rawAmps
+  local xs = {}
+  local topYs = {}
+  local botYs = {}
+  local maxAmp = 8.5
+
+  for i = 1, nPts do
+    local x = (i - 1) * (width / (nPts - 1))
+    local amp = math.max(0.6, (rawAmps[i] or 0) * maxAmp)
+    xs[i] = x
+    topYs[i] = cy - amp
+    botYs[i] = cy + amp
+  end
+
+  local parts = {}
+  parts[#parts + 1] = string.format("M %.1f %.1f ", xs[1], topYs[1])
+  -- Forward along top
+  for i = 1, nPts - 1 do
+    local x0, y0 = xs[i], topYs[i]
+    local x1, y1 = xs[i + 1], topYs[i + 1]
+    local cx = x0 + (x1 - x0) * 0.5
+    parts[#parts + 1] = string.format("C %.1f %.1f, %.1f %.1f, %.1f %.1f ", cx, y0, cx, y1, x1, y1)
+  end
+  -- Backward along bottom
+  for i = nPts, 2, -1 do
+    local x0, y0 = xs[i], botYs[i]
+    local x1, y1 = xs[i - 1], botYs[i - 1]
+    local cx = x0 + (x1 - x0) * 0.5
+    parts[#parts + 1] = string.format("C %.1f %.1f, %.1f %.1f, %.1f %.1f ", cx, y0, cx, y1, x1, y1)
+  end
+  parts[#parts + 1] = "Z"
+  local pathD = table.concat(parts)
+
+  local escText = xmlEscape(text)
+  local midX = width / 2.0
+
+  return string.format([[<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">
+  <!-- Layer 1: Background Mirrored Waveform Curve -->
+  <path d="%s" fill="#7da0fa" fill-opacity="0.28" stroke="#7da0fa" stroke-width="1.2" stroke-opacity="0.85" />
+  <!-- Layer 2: Foreground Lyric Text -->
+  <text x="%.1f" y="16.5" font-family="Maple Mono NF, system-ui, sans-serif" font-size="12" font-weight="600" fill="#ffffff" text-anchor="middle">%s</text>
+</svg>]], width, height, width, height, pathD, midX, escText)
 end
 
 -- Which panel preset to open (panel_size plugin setting).
@@ -144,7 +150,7 @@ local function widgetOptions()
     artSize = math.max(8, math.min(96, cfgInt("art_size", 16))),
     scroll = scroll,
     hideWhenNoMedia = cfgBool("hide_when_no_media", false),
-    rhythmStyle = noctalia.getConfig("rhythm_style") or "bed",
+    rhythmStyle = noctalia.getConfig("rhythm_style") or "mirrored",
   }
 end
 
@@ -387,24 +393,20 @@ local function renderFrom(m, force)
   local icon = iconChild()
   if icon then children[#children + 1] = icon end
 
-  -- Subtitle / Title label (Primary content)
-  local label = ui.label({
-    key = "title",
-    text = shown,
-    fontSize = FONT_PX,
-    opacity = dim,
-    maxLines = 1,
-  })
-
-  if o.rhythmStyle == "bed" and rhythmActive then
-    -- Smooth waveform bed under lyrics
+  if o.rhythmStyle == "mirrored" and rhythmActive then
+    svgFlip = 1 - svgFlip
+    local svgPath = "/dev/shm/noctalia_lyrics_" .. svgFlip .. ".svg"
     local textWidth = charCount(shown) * CHAR_PX
-    local waveWidth = math.min(o.maxLength - iconW, math.max(64, math.floor(textWidth + 8)))
-    local wave = buildWaveGraph(levels, waveWidth, 7)
-    local textCol = ui.column({
-      key = "textcol",
-      align = "center",
-      gap = 0,
+    local waveWidth = math.min(o.maxLength - iconW, math.max(120, math.floor(textWidth + 36)))
+    local svgContent = generateMirroredWaveSvg(shown, levels, waveWidth, 24)
+    pcall(function() noctalia.writeFile(svgPath, svgContent) end)
+
+    children[#children + 1] = ui.image({
+      key = "lyrics_mirrored_" .. svgFlip,
+      path = svgPath,
+      width = waveWidth,
+      height = 24,
+      fit = "contain",
       onHover = function(state)
         local h = (state == "true")
         if h ~= hovered then
@@ -412,34 +414,15 @@ local function renderFrom(m, force)
           renderFrom(media(), true)
         end
       end,
-    }, { label, wave })
-    children[#children + 1] = textCol
-  elseif o.rhythmStyle == "wave" and rhythmActive then
-    -- Smooth waveform capsule next to lyrics
-    local textNode = ui.row({
-      key = "textwrap",
-      align = "center",
-      onHover = function(state)
-        local h = (state == "true")
-        if h ~= hovered then
-          hovered = h
-          renderFrom(media(), true)
-        end
-      end,
-    }, { label })
-    children[#children + 1] = textNode
-    children[#children + 1] = ui.row({
-      key = "rhythm_capsule",
-      align = "center",
-      height = 16,
-      paddingH = 4,
-      paddingV = 1,
-      radius = 8,
-      fill = "surface_variant/0.4",
-    }, {
-      buildWaveGraph(levels, 40, 12),
     })
   else
+    local label = ui.label({
+      key = "title",
+      text = shown,
+      fontSize = FONT_PX,
+      opacity = dim,
+      maxLines = 1,
+    })
     local textNode = ui.row({
       key = "textwrap",
       align = "center",

@@ -129,8 +129,7 @@
       "description": "Visual style of the reactive rhythm background behind lyrics.",
       "label": "Rhythm background effect",
       "options": {
-        "bed": "Waveform bed under lyrics",
-        "wave": "Inline smooth wave curve",
+        "mirrored": "Dual-layer mirrored wave",
         "none": "Off"
       }
     },
