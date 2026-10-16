@@ -49,88 +49,61 @@ local function computeRhythmSig(levels, playing)
   return table.concat(parts, ";")
 end
 
--- Ambient audio visualizer background node (rendered after lyrics)
-local function buildRhythmNode(levels, playing, o)
-  if not playing or not levels or #levels == 0 then return nil end
-  local style = o.rhythmStyle or "bars"
-  if style == "none" then return nil end
-
-  local sum = 0
-  for _, v in ipairs(levels) do sum = sum + v end
-  local avgEnergy = sum / #levels
-  local isSilent = avgEnergy < 0.02
-
-  if style == "wave" then
-    return ui.row({
-      key = "rhythm_capsule",
-      align = "center",
-      height = 16,
-      paddingH = 4,
-      paddingV = 1,
-      radius = 8,
-      fill = "surface_variant/0.5",
-    }, {
-      ui.graph({
-        key = "rhythm_graph",
-        values = levels,
-        width = 34,
-        height = 12,
-        color = "primary",
-        lineWidth = 1.5,
-        fillOpacity = 0.35,
-      })
-    })
-  elseif style == "dots" then
-    local chars = {}
-    for _, v in ipairs(levels) do
-      local idx = math.min(#GLYPHS, math.max(1, math.floor(v * (#GLYPHS - 1)) + 1))
-      chars[#chars + 1] = GLYPHS[idx]
-    end
-    return ui.row({
-      key = "rhythm_capsule",
-      align = "center",
-      height = 16,
-      paddingH = 5,
-      paddingV = 2,
-      radius = 8,
-      fill = "surface_variant/0.5",
-    }, {
-      ui.label({
-        key = "rhythm_dots",
-        text = table.concat(chars),
-        fontSize = FONT_PX - 1,
-        color = "primary",
-        opacity = isSilent and 0.35 or 0.85,
-      })
-    })
-  else
-    -- Default: "bars" — elegant rounded equalizer bars inside background capsule
-    local bars = {}
-    local maxH = 12
-    local minH = 2
-    for i, lvl in ipairs(levels) do
-      local h = isSilent and minH or math.floor(minH + lvl * (maxH - minH) + 0.5)
-      local op = isSilent and 0.35 or (0.5 + lvl * 0.5)
-      bars[#bars + 1] = ui.box({
-        key = "rb_" .. i,
-        width = 2,
-        height = h,
-        radius = 1,
-        fill = "primary",
-        opacity = op,
-      })
-    end
-    return ui.row({
-      key = "rhythm_capsule",
-      align = "center",
-      height = 16,
-      paddingH = 5,
-      paddingV = 2,
-      radius = 8,
-      fill = "surface_variant/0.5",
-      gap = 2,
-    }, bars)
+-- Cosine interpolation to generate a smooth, organic audio waveform curve
+local function smoothCurve(rawLevels, targetPoints)
+  targetPoints = targetPoints or 28
+  if not rawLevels or #rawLevels == 0 then
+    local zeros = {}
+    for i = 1, targetPoints do zeros[i] = 0 end
+    return zeros
   end
+
+  local pts = { 0 }
+  for _, v in ipairs(rawLevels) do
+    pts[#pts + 1] = v
+  end
+  pts[#pts + 1] = 0
+
+  local n = #pts
+  local result = {}
+  local step = (n - 1) / (targetPoints - 1)
+
+  for i = 0, targetPoints - 1 do
+    local pos = i * step + 1
+    local idx1 = math.floor(pos)
+    local idx2 = math.min(n, idx1 + 1)
+    local mu = pos - idx1
+    local mu2 = (1 - math.cos(mu * math.pi)) / 2
+    local val = pts[idx1] * (1 - mu2) + pts[idx2] * mu2
+    result[#result + 1] = math.min(1.0, math.max(0.0, val))
+  end
+  return result
+end
+
+-- Secondary layered wave with phase lag for depth
+local function companionCurve(curve)
+  local out = {}
+  for i, v in ipairs(curve) do
+    local lag = math.max(1, i - 2)
+    out[#out + 1] = math.min(1.0, math.max(0.0, v * 0.55 + (curve[lag] or 0) * 0.35))
+  end
+  return out
+end
+
+local function buildWaveGraph(levels, width, height)
+  local c1 = smoothCurve(levels, 28)
+  local c2 = companionCurve(c1)
+  return ui.graph({
+    key = "rhythm_curve",
+    values = c1,
+    values2 = c2,
+    width = width,
+    height = height,
+    color = "primary",
+    color2 = "secondary",
+    lineWidth = 1.2,
+    fillOpacity = 0.28,
+  })
 end
 
 -- Which panel preset to open (panel_size plugin setting).
@@ -171,7 +144,7 @@ local function widgetOptions()
     artSize = math.max(8, math.min(96, cfgInt("art_size", 16))),
     scroll = scroll,
     hideWhenNoMedia = cfgBool("hide_when_no_media", false),
-    rhythmStyle = noctalia.getConfig("rhythm_style") or "bars",
+    rhythmStyle = noctalia.getConfig("rhythm_style") or "bed",
   }
 end
 
@@ -388,7 +361,7 @@ local function renderFrom(m, force)
   local rhythmActive = levels and #levels > 0 and o.rhythmStyle ~= "none"
 
   local iconW = (not o.hideArt) and (o.artSize + GAP) or 0
-  local rhythmW = rhythmActive and (36 + GAP) or 0
+  local rhythmW = (o.rhythmStyle == "wave" and rhythmActive) and (44 + GAP) or 0
   local budget = math.max(8, math.floor((o.maxLength - iconW - rhythmW) / CHAR_PX))
 
   local overBudget = charCount(full) > budget
@@ -423,26 +396,62 @@ local function renderFrom(m, force)
     maxLines = 1,
   })
 
-  local textNode = ui.row({
-    key = "textwrap",
-    align = "center",
-    paddingH = 4,
-    paddingV = 1,
-    radius = 6,
-    onHover = function(state)
-      local h = (state == "true")
-      if h ~= hovered then
-        hovered = h
-        renderFrom(media(), true)
-      end
-    end,
-  }, { label })
-  children[#children + 1] = textNode
-
-  -- Ambient audio visualizer background node (rendered after lyrics)
-  local rhythm = buildRhythmNode(levels, m.playing, o)
-  if rhythm then
-    children[#children + 1] = rhythm
+  if o.rhythmStyle == "bed" and rhythmActive then
+    -- Smooth waveform bed under lyrics
+    local textWidth = charCount(shown) * CHAR_PX
+    local waveWidth = math.min(o.maxLength - iconW, math.max(64, math.floor(textWidth + 8)))
+    local wave = buildWaveGraph(levels, waveWidth, 7)
+    local textCol = ui.column({
+      key = "textcol",
+      align = "center",
+      gap = 0,
+      onHover = function(state)
+        local h = (state == "true")
+        if h ~= hovered then
+          hovered = h
+          renderFrom(media(), true)
+        end
+      end,
+    }, { label, wave })
+    children[#children + 1] = textCol
+  elseif o.rhythmStyle == "wave" and rhythmActive then
+    -- Smooth waveform capsule next to lyrics
+    local textNode = ui.row({
+      key = "textwrap",
+      align = "center",
+      onHover = function(state)
+        local h = (state == "true")
+        if h ~= hovered then
+          hovered = h
+          renderFrom(media(), true)
+        end
+      end,
+    }, { label })
+    children[#children + 1] = textNode
+    children[#children + 1] = ui.row({
+      key = "rhythm_capsule",
+      align = "center",
+      height = 16,
+      paddingH = 4,
+      paddingV = 1,
+      radius = 8,
+      fill = "surface_variant/0.4",
+    }, {
+      buildWaveGraph(levels, 40, 12),
+    })
+  else
+    local textNode = ui.row({
+      key = "textwrap",
+      align = "center",
+      onHover = function(state)
+        local h = (state == "true")
+        if h ~= hovered then
+          hovered = h
+          renderFrom(media(), true)
+        end
+      end,
+    }, { label })
+    children[#children + 1] = textNode
   end
 
   barWidget.render(ui.row({ gap = GAP, align = "center" }, children))
@@ -489,7 +498,7 @@ function update()
   local full = buildFull(m, o)
   local iconW = (not o.hideArt) and (o.artSize + GAP) or 0
   local rhythmActive = levels and #levels > 0 and o.rhythmStyle ~= "none"
-  local rhythmW = rhythmActive and (36 + GAP) or 0
+  local rhythmW = (o.rhythmStyle == "wave" and rhythmActive) and (44 + GAP) or 0
   local budget = math.max(8, math.floor((o.maxLength - iconW - rhythmW) / CHAR_PX))
   local active = charCount(full) > budget and
     (o.scroll == "always" or (o.scroll == "on_hover" and hovered))

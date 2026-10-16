@@ -1,7 +1,7 @@
 [[plugin]]
 id = "nml/media-lyrics"
 name = "Media Lyrics"
-version = "1.1.0"
+version = "1.1.1"
 plugin_api = 30
 author = "DotRedstone"
 license = "MIT"

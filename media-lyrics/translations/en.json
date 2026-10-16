@@ -129,9 +129,8 @@
       "description": "Visual style of the reactive rhythm background behind lyrics.",
       "label": "Rhythm background effect",
       "options": {
-        "bars": "Equalizer bars capsule",
-        "wave": "Smooth waveform curve",
-        "dots": "Rhythm dot matrix",
+        "bed": "Waveform bed under lyrics",
+        "wave": "Inline smooth wave curve",
         "none": "Off"
       }
     },

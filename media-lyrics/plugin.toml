@@ -10,7 +10,7 @@
 
 id = "nml/media-lyrics"
 name = "Media Lyrics"
-version = "1.1.0"
+version = "1.1.1"
 plugin_api = 30
 author = "DotRedstone"
 license = "MIT"
@@ -217,11 +217,10 @@ entry = "widget.luau"
   type = "select"
   label_key = "settings.rhythm_style.label"
   description_key = "settings.rhythm_style.description"
-  default = "bars"
+  default = "bed"
   options = [
-    { value = "bars", label_key = "settings.rhythm_style.options.bars" },
+    { value = "bed", label_key = "settings.rhythm_style.options.bed" },
     { value = "wave", label_key = "settings.rhythm_style.options.wave" },
-    { value = "dots", label_key = "settings.rhythm_style.options.dots" },
     { value = "none", label_key = "settings.rhythm_style.options.none" },
   ]
   visible_when = { key = "album_art_only", values = ["false"] }
