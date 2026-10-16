@@ -55,35 +55,53 @@ local function xmlEscape(str)
   return str:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
 end
 
--- Generate a real dual-layer SVG: Layer 1 is the mirrored audio wave, Layer 2 is the sharp lyric text
-local function generateMirroredWaveSvg(text, levels, width, height)
-  local cy = height / 2.0
-  local rawAmps = { 0 }
-  if levels and #levels > 0 then
-    for i = 1, math.min(6, #levels) do
-      rawAmps[#rawAmps + 1] = levels[i]
-    end
-  else
-    for i = 1, 6 do rawAmps[#rawAmps + 1] = 0 end
-  end
-  rawAmps[#rawAmps + 1] = 0
+local TARGET_WAVE_PTS = 21
 
-  local nPts = #rawAmps
+local function interpolateWave(raw, targetPts)
+  local n = #raw
+  local curve = {}
+  local step = (n - 1) / (targetPts - 1)
+  for i = 0, targetPts - 1 do
+    local pos = i * step + 1
+    local idx1 = math.floor(pos)
+    local idx2 = math.min(n, idx1 + 1)
+    local mu = pos - idx1
+    local mu2 = (1 - math.cos(mu * math.pi)) / 2.0
+    local val = raw[idx1] * (1 - mu2) + raw[idx2] * mu2
+    curve[#curve + 1] = val
+  end
+  return curve
+end
+
+local function tukeyWindow(i, n, alpha)
+  local p = (i - 1) / (n - 1)
+  local halfA = alpha * 0.5
+  if p < halfA then
+    return 0.5 * (1.0 - math.cos(math.pi * p / halfA))
+  elseif p > (1.0 - halfA) then
+    return 0.5 * (1.0 - math.cos(math.pi * (1.0 - p) / halfA))
+  else
+    return 1.0
+  end
+end
+
+local function buildSplinePath(curve, width, cy, maxAmp)
+  local nPts = #curve
   local xs = {}
   local topYs = {}
   local botYs = {}
-  local maxAmp = 8.5
 
   for i = 1, nPts do
     local x = (i - 1) * (width / (nPts - 1))
-    local amp = math.max(0.6, (rawAmps[i] or 0) * maxAmp)
+    local w = tukeyWindow(i, nPts, 0.35)
+    local amp = math.max(0.0, (curve[i] or 0) * maxAmp * w)
     xs[i] = x
     topYs[i] = cy - amp
     botYs[i] = cy + amp
   end
 
   local parts = {}
-  parts[#parts + 1] = string.format("M %.1f %.1f ", xs[1], topYs[1])
+  parts[#parts + 1] = string.format("M %.1f %.1f ", xs[1], cy)
   -- Forward along top
   for i = 1, nPts - 1 do
     local x0, y0 = xs[i], topYs[i]
@@ -96,20 +114,66 @@ local function generateMirroredWaveSvg(text, levels, width, height)
     local x0, y0 = xs[i], botYs[i]
     local x1, y1 = xs[i - 1], botYs[i - 1]
     local cx = x0 + (x1 - x0) * 0.5
-    parts[#parts + 1] = string.format("C %.1f %.1f, %.1f %.1f, %.1f %.1f ", cx, y0, cx, y1, x1, y1)
+    parts[#parts + 1] = string.format("C %.1f %.1f, %.1f %.1f, %.1f %.1f ", cx, y0, cx, y1, xs[i - 1], botYs[i - 1])
   end
   parts[#parts + 1] = "Z"
-  local pathD = table.concat(parts)
+  return table.concat(parts)
+end
+
+-- Generate a real dual-layer SVG:
+-- 1. Subtle horizontal center baseline
+-- 2. Mirrored wave fills (NO stroke) with soft luminous gradients
+-- 3. Sharp foreground lyric text
+local function generateMirroredWaveSvg(text, levels, width, height)
+  local cy = height / 2.0
+  local l1 = (levels and levels[1]) or 0
+  local l2 = (levels and levels[2]) or 0
+  local l3 = (levels and levels[3]) or 0
+  local l4 = (levels and levels[4]) or 0
+  local l5 = (levels and levels[5]) or 0
+  local l6 = (levels and levels[6]) or 0
+
+  -- Dynamic multi-frequency distribution across the width
+  local rawPrimary = { 0.0, l6 * 0.8, l4, l2 * 1.1, l1 * 1.2, l1 * 1.2, l3 * 1.1, l5, l6 * 0.8, 0.0 }
+  local rawSecondary = { 0.0, l5 * 0.7, l3 * 0.9, l1 * 0.8, l2 * 1.0, l2 * 1.0, l1 * 0.8, l4 * 0.9, l5 * 0.7, 0.0 }
+
+  local c1 = interpolateWave(rawPrimary, TARGET_WAVE_PTS)
+  local c2 = interpolateWave(rawSecondary, TARGET_WAVE_PTS)
+
+  local path1 = buildSplinePath(c1, width, cy, 9.5)
+  local path2 = buildSplinePath(c2, width, cy, 7.0)
 
   local escText = xmlEscape(text)
   local midX = width / 2.0
 
   return string.format([[<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">
-  <!-- Layer 1: Background Mirrored Waveform Curve -->
-  <path d="%s" fill="#7da0fa" fill-opacity="0.28" stroke="#7da0fa" stroke-width="1.2" stroke-opacity="0.85" />
-  <!-- Layer 2: Foreground Lyric Text -->
+  <defs>
+    <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%%" stop-color="#89b4fa" stop-opacity="0" />
+      <stop offset="10%%" stop-color="#89b4fa" stop-opacity="0.45" />
+      <stop offset="90%%" stop-color="#89b4fa" stop-opacity="0.45" />
+      <stop offset="100%%" stop-color="#89b4fa" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="waveGrad1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%%" stop-color="#89b4fa" stop-opacity="0.05" />
+      <stop offset="50%%" stop-color="#89b4fa" stop-opacity="0.42" />
+      <stop offset="100%%" stop-color="#89b4fa" stop-opacity="0.05" />
+    </linearGradient>
+    <linearGradient id="waveGrad2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%%" stop-color="#cba6f7" stop-opacity="0.02" />
+      <stop offset="50%%" stop-color="#cba6f7" stop-opacity="0.25" />
+      <stop offset="100%%" stop-color="#cba6f7" stop-opacity="0.02" />
+    </linearGradient>
+  </defs>
+  <!-- Center Horizontal Baseline -->
+  <line x1="0" y1="%.1f" x2="%d" y2="%.1f" stroke="url(#lineGrad)" stroke-width="1.0" />
+  <!-- Ambient Mirrored Wave Layer (No Stroke) -->
+  <path d="%s" fill="url(#waveGrad2)" stroke="none" />
+  <!-- Primary Mirrored Wave Layer (No Stroke) -->
+  <path d="%s" fill="url(#waveGrad1)" stroke="none" />
+  <!-- Foreground Lyric Text -->
   <text x="%.1f" y="16.5" font-family="Maple Mono NF, system-ui, sans-serif" font-size="12" font-weight="600" fill="#ffffff" text-anchor="middle">%s</text>
-</svg>]], width, height, width, height, pathD, midX, escText)
+</svg>]], width, height, width, height, cy, width, cy, path2, path1, midX, escText)
 end
 
 -- Which panel preset to open (panel_size plugin setting).
@@ -167,6 +231,29 @@ local function charCount(s)
     n = n + 1
   end
   return n
+end
+
+local function visualWidthPx(s)
+  local i, w = 1, 0
+  while i <= #s do
+    local b = s:byte(i)
+    local len = 1
+    if b >= 0xF0 then
+      len = 4
+      w = w + 14.0
+    elseif b >= 0xE0 then
+      len = 3
+      w = w + 12.5
+    elseif b >= 0xC0 then
+      len = 2
+      w = w + 9.0
+    else
+      len = 1
+      w = w + 7.5
+    end
+    i = i + len
+  end
+  return w
 end
 
 local function toChars(s)
@@ -396,8 +483,8 @@ local function renderFrom(m, force)
   if o.rhythmStyle == "mirrored" and rhythmActive then
     svgFlip = 1 - svgFlip
     local svgPath = "/dev/shm/noctalia_lyrics_" .. svgFlip .. ".svg"
-    local textWidth = charCount(shown) * CHAR_PX
-    local waveWidth = math.min(o.maxLength - iconW, math.max(120, math.floor(textWidth + 36)))
+    local textWidth = visualWidthPx(shown)
+    local waveWidth = math.min(o.maxLength - iconW, math.max(140, math.floor(textWidth + 64)))
     local svgContent = generateMirroredWaveSvg(shown, levels, waveWidth, 24)
     pcall(function() noctalia.writeFile(svgPath, svgContent) end)
 
