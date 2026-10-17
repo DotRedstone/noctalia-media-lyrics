@@ -10,7 +10,7 @@
 
 id = "nml/media-lyrics"
 name = "Media Lyrics"
-version = "1.3.3"
+version = "1.3.4"
 plugin_api = 30
 author = "DotRedstone"
 license = "MIT"

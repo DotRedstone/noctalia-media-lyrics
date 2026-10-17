@@ -64,10 +64,7 @@ local T = {
 }
 
 local snap = nil       -- latest snapshot from the service
-local cursorLine = 0   -- keyboard/scroll cursor over lyric lines (0 = follow playback)
 local hoveredLine = 0  -- pointer hovered lyric line (0 = none); applied on the next render
-local lastScrollMs = 0 -- timestamp of last manual scroll/cursor navigation (0 = idle)
-local SCROLL_RETURN_TIMEOUT_MS = 4000 -- auto-return to active line after 4s idle
 
 -- Seek slider state (progress bar). While the user drags, the host owns the
 -- thumb and re-applies `value` only when `!slider->dragging()`. Once released,
@@ -419,33 +416,24 @@ local function buildLyricsBody(s)
       -- keyboard cursor still highlights a line (no seek — no timestamps).
       local rows = {}
       for i, l in ipairs(lines) do
-        local isCursor = (i == cursorLine)
-        local rowChildren = {}
-        if isCursor then
-          rowChildren[#rowChildren + 1] = ui.glyph({
-            key = "cur" .. i,
-            name = "chevron-right",
-            size = 12,
-            color = T.lyricActive,
-          })
-          rowChildren[#rowChildren + 1] = ui.spacer({ width = 4 })
-        end
-        rowChildren[#rowChildren + 1] = ui.label({
-          key = "lbl" .. i,
-          text = wrapLyric(l.text, T.fsNearLyric, "normal", isCursor and 18 or 0),
-          fontSize = T.fsNearLyric,
-          color = isCursor and T.lyricActive or T.lyricNear,
-          opacity = isCursor and 1 or 0.75,
-          textAlign = "start",
-        })
+        local rowChildren = {
+          ui.label({
+            key = "lbl" .. i,
+            text = wrapLyric(l.text, T.fsNearLyric, "normal", 0),
+            fontSize = T.fsNearLyric,
+            color = T.lyricNear,
+            opacity = 0.75,
+            textAlign = "start",
+          }),
+        }
         rows[#rows + 1] = ui.row({
-          key = "lyr_" .. i .. "_" .. (isCursor and "cur" or "dim"),
+          key = "lyr_" .. i .. "_dim",
           align = "center",
           justify = "start",
           paddingH = 14,
           paddingV = 6,
           radius = 10,
-          fill = isCursor and "surface_variant/0.3" or nil,
+          fill = nil,
         }, rowChildren)
         rows[#rows + 1] = ui.spacer({ key = "lgap" .. i, height = 4 })
       end
@@ -472,33 +460,28 @@ local function buildLyricsBody(s)
   local fsArr, wArr = {}, {}
   for i = 1, n do
     local isA = (i == active)
-    local isC = (i == cursorLine)
     local d = math.abs(i - active)
     fsArr[i] = isA and T.fsActiveLyric or (d <= 2 and T.fsNearLyric or T.fsFarLyric)
-    wArr[i] = (isA or isC) and "bold" or (d <= 2 and "medium" or "normal")
+    wArr[i] = isA and "bold" or (d <= 2 and "medium" or "normal")
   end
   -- Wrapped lines consume more than one visual row. The window must fit a
   -- VERTICAL BUDGET of visibleLines() rows, so count the wrapped sub-lines
   -- a row needs and shrink the window until its total fits (wrapping long
   -- lines must never push the active line below the panel edge).
   local function sublines(i)
-    return 1 + select(2, wrapLyric(s.lyrics[i].text, fsArr[i], wArr[i], i == cursorLine and 18 or 0):gsub("\n", ""))
+    return 1 + select(2, wrapLyric(s.lyrics[i].text, fsArr[i], wArr[i], 0):gsub("\n", ""))
   end
-  -- Karaoke centering: the anchor line (the cursor while the user scrolls,
-  -- otherwise the playing line - and before playback starts the first line) is
-  -- pinned to the exact vertical CENTRE of the lyrics area. The window always
-  -- carries the same number of slots above and below the anchor and the parent
-  -- column centres the block, so the anchor stays on the centre line on load,
-  -- through the track, and at the end (the last line returns to the centre
-  -- instead of sticking to the bottom edge). Out-of-range slots become spacers
-  -- of the same height, which keeps the symmetry exact.
-  local anchor = cursorLine >= 1 and cursorLine or (active >= 1 and active or 1)
+  -- Karaoke centering: the active playing line is pinned to the exact
+  -- vertical CENTRE of the lyrics area. The window always carries the same
+  -- number of slots above and below the anchor and the parent column centres
+  -- the block, so the anchor stays on the centre line on load, through the track,
+  -- and at the end. Out-of-range slots become spacers of the same height,
+  -- which keeps the symmetry exact.
+  local anchor = (active >= 1 and active or 1)
   if anchor < 1 then anchor = 1 end
   if anchor > n then anchor = n end
   -- the "current" line is the playing one only: before the first line starts
-  -- nothing is highlighted yet (the opening line lights up exactly at its
-  -- timestamp, not earlier - owner: "первая строчка не должна подсвечиваться
-  -- сразу а только в положенный ей момент").
+  -- nothing is highlighted yet.
   local hl = active
   local budget = visibleLines()
   local half = math.floor((budget - 1) / 2)
@@ -515,15 +498,12 @@ local function buildLyricsBody(s)
   end
   local rows = {}
   local countdown = countdownValue(s)
-  -- slots are a plain sequence (rows must be a dense array: negative keys are
-  -- invisible to ipairs/#, which silently dropped the left half of the window)
+  -- slots are a plain sequence
   for si = 1, (2 * half + 1) do
     local k = si - 1 - half
     local idx = anchor + k
     if idx >= 1 and idx <= n then
       local isActive = (idx == hl)
-      local isCursor = (idx == cursorLine)
-      local isHover = (idx == hoveredLine)
       local dist = (active >= 1) and math.abs(idx - active) or math.abs(idx - 1)
       local fontSize = (idx == active) and T.fsActiveLyric or fsArr[idx]
       local fontWeight = (idx == hl) and "bold" or wArr[idx]
@@ -535,13 +515,6 @@ local function buildLyricsBody(s)
         color = T.lyricActive
         opacity = 1.0
         fill = "primary/0.12"
-      elseif isCursor then
-        color = T.lyricActive
-        opacity = 1.0
-        fill = "surface_variant/0.3"
-      elseif isHover then
-        color = T.lyricActive
-        opacity = 0.85
       else
         color = (dist <= 2) and T.lyricNear or T.lyricFar
         if dist == 1 then
@@ -556,26 +529,18 @@ local function buildLyricsBody(s)
       end
 
       local lineTime = s.lyrics[idx].time
-      local children = {}
-      if isCursor then
-        children[#children + 1] = ui.glyph({
-          key = "cur" .. idx,
-          name = "chevron-right",
-          size = 12,
-          color = T.lyricActive,
-        })
-        children[#children + 1] = ui.spacer({ width = 4 })
-      end
-      children[#children + 1] = ui.label({
-        key = "lbl" .. idx,
-        text = wrapLyric(s.lyrics[idx].text, fontSize, fontWeight, isCursor and 18 or 0),
-        fontSize = fontSize,
-        fontWeight = fontWeight,
-        color = color,
-        opacity = opacity,
-        textAlign = "start",
-      })
-      local rowState = isActive and "act" or (isCursor and "cur" or (isHover and "hov" or "dim"))
+      local children = {
+        ui.label({
+          key = "lbl" .. idx,
+          text = wrapLyric(s.lyrics[idx].text, fontSize, fontWeight, 0),
+          fontSize = fontSize,
+          fontWeight = fontWeight,
+          color = color,
+          opacity = opacity,
+          textAlign = "start",
+        }),
+      }
+      local rowState = isActive and "act" or "dim"
       local rowProps = {
         key = "lyr_" .. idx .. "_" .. rowState,
         align = "center",
@@ -585,18 +550,12 @@ local function buildLyricsBody(s)
         radius = 10,
         fill = fill,
         onClick = (lineTime >= 0) and function()
-          cursorLine = 0
-          lastScrollMs = 0
           queueSeek(lineTime)
           render()
         end or nil,
         tooltip = (lineTime >= 0)
           and (noctalia.tr("panel.seek-to") .. " " .. fmtTime(lineTime)) or nil,
       }
-      rowProps.onHover = function(state)
-        local want = (state == "true") and idx or 0
-        if want ~= hoveredLine then hoveredLine = want end
-      end
       rows[si] = ui.row(rowProps, children)
     elseif countdown > 0 and k >= -half and k <= -1 then
       -- pre-start: the empty slots above the first line merge into one box
@@ -939,14 +898,6 @@ render = function()
   local L = panelLayout()
   local playerCard = buildPlayerCard(s, L)
 
-  -- footer: provider + mode badge
-  local footerTxt = ""
-  if s.lyricsStatus == "ready" or ((s.lyricsStatus == "choose") and #(s.lyrics or {}) > 0) then
-    footerTxt = (s.lyricsProvider ~= "" and s.lyricsProvider or "")
-      .. (s.synced and (" - " .. noctalia.tr("panel.synced"))
-        or (" - " .. noctalia.tr("panel.unsynced")))
-  end
-
   panel.render(ui.column({ flexGrow = 1, padding = T.pad, gap = T.gapBand }, {
     -- A. chrome header: icon + title left, action buttons right
     ui.row({ key = "chrome", align = "center", justify = "space_between" }, {
@@ -1000,29 +951,6 @@ render = function()
       local lyricsCol = ui.column({ key = "lyrics", flexGrow = 1, gap = 4 }, kids)
       return lyricsCol
     end)(),
-
-    -- D. footer: provider + mode badge
-    (function()
-      if footerTxt == "" then
-        return ui.spacer({ key = "footerEmpty", height = 0, visible = false })
-      end
-      return ui.row({ key = "footerRow", justify = "center", align = "center" }, {
-        ui.row({
-          key = "footerBadge",
-          fill = "surface_variant/0.25",
-          border = "outline/0.15",
-          borderWidth = 1,
-          radius = 12,
-          paddingH = 10,
-          paddingV = 4,
-          align = "center",
-          gap = 6,
-        }, {
-          ui.glyph({ name = s.synced and "sparkles" or "file-text", size = 11, color = T.footer }),
-          ui.label({ text = footerTxt, fontSize = 11, fontWeight = "medium", color = T.footer }),
-        }),
-      })
-    end)(),
   }))
 end
 
@@ -1045,24 +973,12 @@ noctalia.state.watch("media", function(value)
       if tickMarquee then tickMarquee(deltaSec) end
     end
   end
-  -- track changed: drop the lyric cursor so the panel follows playback again
+  -- track changed
   local key = (value.title or "") .. "|" .. (value.artist or "") .. "|" .. tostring(value.lengthSec or 0)
   if key ~= lastTrackKey then
     lastTrackKey = key
-    cursorLine = 0
-    lastScrollMs = 0
     hoveredLine = 0
-    -- a new track invalidates the variant picker: close it and reset local
-    -- open-state (the service drops its own list in invalidateLyrics()).
     showCandidates = false
-  end
-
-  -- idle scroll timeout: auto-return to active playback line after 4s
-  if cursorLine > 0 and lastScrollMs > 0 then
-    if (now - lastScrollMs) >= SCROLL_RETURN_TIMEOUT_MS then
-      cursorLine = 0
-      lastScrollMs = 0
-    end
   end
 
   snap = value
@@ -1070,102 +986,11 @@ noctalia.state.watch("media", function(value)
   render()
 end)
 
--- update() is never called by the host for panels in this build (verified
--- with a live counter probe). Kept as a harmless no-op so the entry stays
--- API-correct if a future build starts ticking panels.
-function update()
-end
-
--- Lyric cursor helpers. cursorLine is 1-based over s.lyrics; 0 = follow the
--- active playback line. moveCursor starts from the active line (or line 1
--- before the first timestamp — fixes the frozen window until the first
--- words), steps by delta and re-centers the window on the cursor.
-local function activeIndex(s)
-  local pos = interpPos(s)
-  local active = -1
-  local n = #(s.lyrics or {})
-  for i = 1, n do
-    if (s.lyrics[i].time >= 0) and (s.lyrics[i].time <= pos) then active = i end
-    if (s.lyrics[i].time >= 0) and (s.lyrics[i].time > pos) then break end
-  end
-  return active
-end
-
-local function moveCursor(delta)
-  local s = snap
-  if not s or not s.lyrics or #s.lyrics == 0 then return end
-  local n = #s.lyrics
-  local cur = cursorLine
-  if cur < 1 or cur > n then
-    cur = activeIndex(s)
-    if cur < 1 then cur = 1 end
-  end
-  cursorLine = math.max(1, math.min(n, cur + delta))
-  hoveredLine = 0
-  lastScrollMs = nowMs()
-  render()
-end
-
--- Activate the line under the cursor: seek the player to its timestamp
--- (synced lyrics only — plain lines have no timestamps).
-local function seekCursor()
-  local s = snap
-  if not s or not s.synced or not s.lyrics then
-    cursorLine = 0
-    lastScrollMs = 0
-    render()
-    return
-  end
-  local cur = cursorLine
-  if cur < 1 or cur > #s.lyrics then
-    cur = activeIndex(s)
-    if cur < 1 then
-      cursorLine = 0
-      lastScrollMs = 0
-      render()
-      return
-    end
-  end
-  local lineTime = s.lyrics[cur].time
-  if lineTime >= 0 then
-    queueSeek(lineTime)
-  end
-  cursorLine = 0
-  lastScrollMs = 0
-  render()
-end
-
 function onOpen(_context)
-  cursorLine = 0
-  lastScrollMs = 0
-  -- second ticks keep position + lyrics moving between service polls
   panel.setWantsSecondTicks(true)
   noctalia.state.set("panel_req", { action = "refresh" })
   render()
 end
 
--- Manual lyric scroll. The host's chord validator accepts only a small set
--- of key names (Up/Down/Left/Right/Return/Space/Escape/Tab — used by
--- community plugins); PageUp/PageDown/Home/End are REJECTED by the catalog
--- scan and drop the plugin from the store, so only Up/Down/Return/Space are
--- declared. Up/Down step the cursor, Return/Space seek to the cursor line.
--- The window never leaves [1..n] (clamped in buildLyricsBody).
-function onKey(chord, pressed)
-  if not pressed then return end
-  if chord == "Up" then
-    moveCursor(-1)
-  elseif chord == "Down" then
-    moveCursor(1)
-  elseif chord == "Return" or chord == "Space" then
-    seekCursor()
-  end
-end
-
--- Docs say onScroll is a bar-widget callback, but declare it anyway: if the
--- host delivers wheel events to panels, this makes wheel scrolling step the
--- lyric cursor. Harmless no-op otherwise.
-function onScroll(axis, steps, startsGesture)
-  if axis ~= "vertical" or startsGesture then return end
-  local dir = (steps or 0) > 0 and 1 or -1
-  moveCursor(dir)
+function update()
 end
