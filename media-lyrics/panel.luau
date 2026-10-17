@@ -66,6 +66,8 @@ local T = {
 local snap = nil       -- latest snapshot from the service
 local cursorLine = 0   -- keyboard/scroll cursor over lyric lines (0 = follow playback)
 local hoveredLine = 0  -- pointer hovered lyric line (0 = none); applied on the next render
+local lastScrollMs = 0 -- timestamp of last manual scroll/cursor navigation (0 = idle)
+local SCROLL_RETURN_TIMEOUT_MS = 4000 -- auto-return to active line after 4s idle
 
 -- Seek slider state (progress bar). While the user drags, the host owns the
 -- thumb and re-applies `value` only when `!slider->dragging()`. Once released,
@@ -161,11 +163,11 @@ local COVER_PX = 64
 local function panelLayout()
   local sz = noctalia.getConfig("panel_size")
   if sz == "compact" then
-    return { cover = COVER_PX, textW = 200, sliderW = 304, ctl = 15, main = 19 }
+    return { cover = COVER_PX, textW = 180, sliderW = 304, ctl = 15, main = 19 }
   elseif sz == "large" then
-    return { cover = COVER_PX, textW = 400, sliderW = 504, ctl = 17, main = 22 }
+    return { cover = COVER_PX, textW = 360, sliderW = 504, ctl = 17, main = 22 }
   end
-  return { cover = COVER_PX, textW = 280, sliderW = 384, ctl = 16, main = 20 }
+  return { cover = COVER_PX, textW = 250, sliderW = 384, ctl = 16, main = 20 }
 end
 
 -- (the karaoke window is symmetric around the anchor line; see buildLyricsBody)
@@ -436,13 +438,13 @@ local function buildLyricsBody(s)
           textAlign = "start",
         })
         rows[#rows + 1] = ui.row({
-          key = "lyr" .. i,
+          key = "lyr_" .. i .. "_" .. (isCursor and "cur" or "dim"),
           align = "center",
           justify = "start",
           paddingH = 14,
           paddingV = 6,
           radius = 10,
-          fill = isCursor and "surface_variant/0.3" or nil,
+          fill = isCursor and "surface_variant/0.3" or "transparent",
         }, rowChildren)
         rows[#rows + 1] = ui.spacer({ key = "lgap" .. i, height = 4 })
       end
@@ -526,7 +528,7 @@ local function buildLyricsBody(s)
       local fontWeight = (idx == hl) and "bold" or wArr[idx]
       local color
       local opacity
-      local fill = nil
+      local fill = "transparent"
 
       if isActive then
         color = T.lyricActive
@@ -572,15 +574,21 @@ local function buildLyricsBody(s)
         opacity = opacity,
         textAlign = "start",
       })
+      local rowState = isActive and "act" or (isCursor and "cur" or (isHover and "hov" or "dim"))
       local rowProps = {
-        key = "lyr" .. idx,
+        key = "lyr_" .. idx .. "_" .. rowState,
         align = "center",
         justify = "start",
         paddingH = 14,
         paddingV = 6,
         radius = 10,
         fill = fill,
-        onClick = (lineTime >= 0) and function() queueSeek(lineTime) end or nil,
+        onClick = (lineTime >= 0) and function()
+          cursorLine = 0
+          lastScrollMs = 0
+          queueSeek(lineTime)
+          render()
+        end or nil,
         tooltip = (lineTime >= 0)
           and (noctalia.tr("panel.seek-to") .. " " .. fmtTime(lineTime)) or nil,
       }
@@ -723,6 +731,8 @@ local function buildPlayerCard(s, L)
       glyphSize = size or L.ctl,
       variant = "ghost",
       controlSize = "sm",
+      width = 28,
+      height = 28,
       enabled = enabled ~= false,
       onClick = function() sendCmd(action) end,
       tooltip = tip,
@@ -747,6 +757,8 @@ local function buildPlayerCard(s, L)
       enabled = s.hasPlayer == true,
       onClick = function() sendCmd("toggle") end,
       controlSize = "sm",
+      width = 34,
+      height = 34,
       tooltip = s.playing and "Pause" or "Play",
     }),
     ctl(glyphFor.next, "next", s.canGoNext ~= false, L.ctl, "Next track"),
@@ -1036,11 +1048,21 @@ noctalia.state.watch("media", function(value)
   if key ~= lastTrackKey then
     lastTrackKey = key
     cursorLine = 0
+    lastScrollMs = 0
     hoveredLine = 0
     -- a new track invalidates the variant picker: close it and reset local
     -- open-state (the service drops its own list in invalidateLyrics()).
     showCandidates = false
   end
+
+  -- idle scroll timeout: auto-return to active playback line after 4s
+  if cursorLine > 0 and lastScrollMs > 0 then
+    if (now - lastScrollMs) >= SCROLL_RETURN_TIMEOUT_MS then
+      cursorLine = 0
+      lastScrollMs = 0
+    end
+  end
+
   snap = value
   lastSnapMs = nowMs()
   render()
@@ -1078,6 +1100,7 @@ local function moveCursor(delta)
   end
   cursorLine = math.max(1, math.min(n, cur + delta))
   hoveredLine = 0
+  lastScrollMs = nowMs()
   render()
 end
 
@@ -1087,6 +1110,7 @@ local function seekCursor()
   local s = snap
   if not s or not s.synced or not s.lyrics then
     cursorLine = 0
+    lastScrollMs = 0
     render()
     return
   end
@@ -1095,6 +1119,7 @@ local function seekCursor()
     cur = activeIndex(s)
     if cur < 1 then
       cursorLine = 0
+      lastScrollMs = 0
       render()
       return
     end
@@ -1104,11 +1129,13 @@ local function seekCursor()
     queueSeek(lineTime)
   end
   cursorLine = 0
+  lastScrollMs = 0
   render()
 end
 
 function onOpen(_context)
   cursorLine = 0
+  lastScrollMs = 0
   -- second ticks keep position + lyrics moving between service polls
   panel.setWantsSecondTicks(true)
   noctalia.state.set("panel_req", { action = "refresh" })

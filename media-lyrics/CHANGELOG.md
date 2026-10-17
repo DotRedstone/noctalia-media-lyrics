@@ -4,6 +4,13 @@ All notable changes to **Media Lyrics** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] — 2026-10-17
+
+**高亮生命周期、按钮防爆格与自动回滚交互优化**：
+- **歌词高亮生命周期修复**：为歌词行引入状态感知动态 Key 与显式 `transparent` 底色，彻底消除历史播放行胶囊背景残留的问题。
+- **播放卡片布局优化**：显式固定播放控制按钮尺寸（28x28 控制按钮、34x34 播放按钮），收紧标题栏宽度并留出呼吸间距，解决右侧下一首按钮被挤压爆格的问题。
+- **移动端交互体验（4秒闲置回弹）**：支持用户滚动浏览歌词时进入自由浏览模式，4 秒无操作后自动平滑回滚至当前正在播放的歌词行。
+
 ## [1.3.0] — 2026-10-17
 
 **Apple Music 现代沉浸风面板重构**：
