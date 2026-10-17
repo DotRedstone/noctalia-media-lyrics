@@ -87,6 +87,7 @@ local marqueePaused = false -- pointer over the title/artist block pauses marque
 local lastTrackKey = "" -- track identity for cursor reset on track change
 local lastSnapMs = 0
 tickMarquee = nil      -- set by buildInfoRow; advances marquee clocks
+local render = nil     -- forward declaration for callbacks before render()
 
 local function nowMs()
   local ok, v = pcall(function() return noctalia.nowMs() end)
@@ -444,7 +445,7 @@ local function buildLyricsBody(s)
           paddingH = 14,
           paddingV = 6,
           radius = 10,
-          fill = isCursor and "surface_variant/0.3" or "transparent",
+          fill = isCursor and "surface_variant/0.3" or nil,
         }, rowChildren)
         rows[#rows + 1] = ui.spacer({ key = "lgap" .. i, height = 4 })
       end
@@ -528,7 +529,7 @@ local function buildLyricsBody(s)
       local fontWeight = (idx == hl) and "bold" or wArr[idx]
       local color
       local opacity
-      local fill = "transparent"
+      local fill = nil
 
       if isActive then
         color = T.lyricActive
@@ -929,7 +930,7 @@ end
 
 -- ============================= render =============================
 
-local function render()
+render = function()
   local s = snap or {
     hasPlayer = false, title = "", artist = "", album = "", artUrl = "",
     playing = false, lengthSec = 0, posSec = 0, lyrics = {},
@@ -996,7 +997,65 @@ local function render()
       if not fills then kids[#kids + 1] = ui.spacer({ key = "lyricsTopFlex", flexGrow = 1 }) end
       for i = 1, #nodes do kids[#kids + 1] = nodes[i] end
       if not fills then kids[#kids + 1] = ui.spacer({ key = "lyricsBotFlex", flexGrow = 1 }) end
-      return ui.column({ key = "lyrics", flexGrow = 1, gap = 4 }, kids)
+      local lyricsCol = ui.column({ key = "lyrics", flexGrow = 1, gap = 4 }, kids)
+      if s.synced and #(s.lyrics or {}) > 1 then
+        local navCol = ui.column({ key = "lyricsNav", justify = "center", align = "center", gap = 8 }, {
+          ui.button({
+            key = "navUp",
+            glyph = "chevron-up",
+            glyphSize = 14,
+            variant = "ghost",
+            controlSize = "sm",
+            width = 24,
+            height = 24,
+            onClick = function() moveCursor(-1) end,
+            tooltip = "上一句 (也可按键盘 ↑)",
+          }),
+          ui.button({
+            key = "navDown",
+            glyph = "chevron-down",
+            glyphSize = 14,
+            variant = "ghost",
+            controlSize = "sm",
+            width = 24,
+            height = 24,
+            onClick = function() moveCursor(1) end,
+            tooltip = "下一句 (也可按键盘 ↓)",
+          }),
+        })
+        return ui.row({ key = "lyricsRow", flexGrow = 1, align = "stretch" }, {
+          lyricsCol,
+          navCol,
+        })
+      end
+      return lyricsCol
+    end)(),
+
+    -- C2. browsing indicator: return to live playback button
+    (function()
+      if cursorLine <= 0 or not s.synced then
+        return ui.spacer({ key = "returnSpacer", height = 0, visible = false })
+      end
+      return ui.row({ key = "returnRow", justify = "center", align = "center" }, {
+        ui.button({
+          key = "returnActiveBtn",
+          variant = "primary",
+          controlSize = "sm",
+          text = "回到当前播放 (4s)",
+          glyph = "arrow-back-up",
+          glyphSize = 12,
+          fontSize = 11,
+          radius = 12,
+          paddingH = 12,
+          paddingV = 4,
+          onClick = function()
+            cursorLine = 0
+            lastScrollMs = 0
+            render()
+          end,
+          tooltip = "点击立即返回当前播放歌词行",
+        }),
+      })
     end)(),
 
     -- D. footer: provider + mode badge

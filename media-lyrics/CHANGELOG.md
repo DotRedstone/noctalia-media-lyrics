@@ -4,6 +4,16 @@ All notable changes to **Media Lyrics** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] — 2026-10-17
+
+**歌词交互与鼠标操控体验增强**：
+- **单行歌词点击即时跳转修复**：修复 `onClick` 闭包提前引用未声明的 `render()` 导致崩溃的问题，现在点击任意歌词行均能毫秒级精准 Seek 到对应时间戳并同步播放。
+- **歌词导航与移动端沉浸体验**：
+  - 新增歌词旁侧轻量化快速导航按钮（`▲` / `▼`），鼠标用户可单手轻松切换上下一句；
+  - 浏览歌词时显示“回到当前播放 (4s)”沉浸式胶囊按键，支持一键返回当前句，闲置 4 秒也会无感自动平滑回弹；
+  - 键盘 `↑` / `↓` 翻行与 `Space` / `Enter` 快速跳转继续保持完整响应。
+- **告警消除**：清除 `transparent` 填充色引起的 UI 树样式警告，统一使用 `nil` 干净清理底色。
+
 ## [1.3.1] — 2026-10-17
 
 **高亮生命周期、按钮防爆格与自动回滚交互优化**：
