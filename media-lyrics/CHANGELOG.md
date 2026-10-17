@@ -4,6 +4,13 @@ All notable changes to **Media Lyrics** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-10-17
+
+**Apple Music 现代沉浸风面板重构**：
+- **悬浮毛玻璃 Player Card**：将 64px 大圆角封面、歌曲与艺术家信息、播放控制按钮组、以及与进度条融合的时间两端排版（`01:02 ──●──── 04:37`）一体化整合至悬浮卡片中。
+- **左对齐流媒体排版与动态景深**：重构歌词展示逻辑为左对齐排版，彻底消除居中排版的晃动锯齿感；当前句配备精致的胶囊微高亮底色，前后歌词行采用多层级动态景深渐隐（0.65 / 0.45 / 0.28 / 0.15）。
+- **精致元信息徽章**：底部提供源与同步模式的圆角胶囊 Badge 状态展示。
+
 ## [0.9.8] — 2026-10-13
 
 A **desktop widget** — the now-playing view as a tile pinned to the desktop and shown on

@@ -30,36 +30,36 @@
 
 local T = {
   -- layout
-  pad = 4,               -- root padding
-  gapBand = 8,           -- between bands A/B/hairline/C
-  gapInline = 12,         -- cover <-> text
-  gapMicro = 6,           -- inside groups (transport step, meta stack)
+  pad = 12,              -- root padding
+  gapBand = 10,          -- between chrome / playerCard / lyrics / footer
+  gapInline = 14,        -- cover <-> text
+  gapMicro = 6,          -- inside groups
 
   -- cover
-  cover = 50,             -- inner cover size (logical px)
-  coverRadius = 10,       -- inner cover corner radius
+  cover = 64,            -- 64px prominent cover
+  coverRadius = 14,      -- smooth cover radius
 
   -- typography
-  fsOverline = 11,        -- chrome header / footer
-  fsTitle = 19,
+  fsOverline = 12,       -- chrome header
+  fsTitle = 18,
   fsMeta = 13,
-  fsTime = 12,
-  fsActiveLyric = 17,
+  fsTime = 11,
+  fsActiveLyric = 18,
   fsNearLyric = 15,
   fsFarLyric = 14,
-  fsCountdown = 44,       -- karaoke 3-2-1 lead-in digit (big, above the centre line)
+  fsCountdown = 44,
 
   -- colors (state colors live here too)
   colOverline = "on_surface_variant",
   colTitle = "on_surface",
   colMeta = "on_surface_variant",
   colTime = "on_surface_variant",
-  ringTrack = "outline/0.5",      -- cover frame border (the progress control
-  lyricActive = "primary",        -- is a ui.slider, which colours itself)
+  ringTrack = "outline/0.25",     -- cover frame border
+  lyricActive = "primary",
   lyricNear = "on_surface",
   lyricFar = "on_surface_variant",
-  footer = "on_surface_variant/0.7",
-  hairline = "outline/0.35",
+  footer = "on_surface_variant",
+  hairline = "outline/0.2",
   emptyState = "on_surface_variant",
 }
 
@@ -157,17 +157,15 @@ local marqueeState = {}   -- [key] = { text, elapsed }
 -- transport block - no dead slot (a flexGrow spring used to swallow ~127 px
 -- while the title was still truncated).
 local GAP_PX = 12
-local COVER_PX = 50
+local COVER_PX = 64
 local function panelLayout()
   local sz = noctalia.getConfig("panel_size")
-  -- transport block width (prev + play + next + the time label under them),
-  -- measured live per preset; it scales with the button tiers.
   if sz == "compact" then
-    return { cover = COVER_PX, gapInline = GAP_PX, transport = 120, textW = 224, ctl = 14, main = 18 }
+    return { cover = COVER_PX, textW = 200, sliderW = 304, ctl = 15, main = 19 }
   elseif sz == "large" then
-    return { cover = COVER_PX, gapInline = GAP_PX, transport = 150, textW = 398, ctl = 20, main = 24 }
+    return { cover = COVER_PX, textW = 400, sliderW = 504, ctl = 17, main = 22 }
   end
-  return { cover = COVER_PX, gapInline = GAP_PX, transport = 132, textW = 296, ctl = 18, main = 22 }
+  return { cover = COVER_PX, textW = 280, sliderW = 384, ctl = 16, main = 20 }
 end
 
 -- (the karaoke window is symmetric around the anchor line; see buildLyricsBody)
@@ -182,25 +180,10 @@ end
 -- medium 520 / large 640); wrapLyric subtracts WRAP_GUTTER (root padding plus
 -- a small margin so a flush-fitting line breaks instead of touching the edge).
 local LYR_WIDTH = { compact = 440, medium = 520, large = 640 }
--- Wrap safety gutter: a line whose advance width lands exactly on the content
--- width renders its last glyph flush against the panel border (seen live: the
--- final "m" of "...my doom" touched the edge). Keep the wrap a little inside
--- so flush-fitting lines break instead of kissing the frame - the same rule
--- the mini panel uses. The width is the panel surface; the gutter covers the
--- root padding plus that margin.
-local WRAP_GUTTER = 24
-
--- Vertical budget: how many REAL rows the lyrics area holds. The presets' panel
--- heights are 440/520/640; the header band, the seek slider and the footer take
--- roughly the first 120 px and the bottom ~45 px, leaving an area that a
--- measured row pitch (~29 px: 17 px glyphs on a 21 px line box + the 6 px gap)
--- actually fits. Verified against a live screenshot at scale 2: the medium panel
--- area is 357 px and a rendered row is 29 px, so 14 rows overflowed the bottom
--- edge by ~50 px and the last line was clipped - the reported "text climbs onto
--- the panel edge". Sizes stay on the 2-3-4 step so a compact panel can never
--- budget MORE rows than a large one.
-local LYR_AREA_PX = { compact = 278, medium = 357, large = 477 }
-local LYR_ROW_PX = 29
+-- Wrap safety gutter: covers root padding (24px) + row padding (28px) + safety margin (12px)
+local WRAP_GUTTER = 64
+local LYR_AREA_PX = { compact = 216, medium = 288, large = 396 }
+local LYR_ROW_PX = 36
 local function visibleLines()
   local sz = noctalia.getConfig("panel_size")
   return math.floor((LYR_AREA_PX[sz] or LYR_AREA_PX.medium) / LYR_ROW_PX)
@@ -429,34 +412,39 @@ local function buildLyricsBody(s)
     -- render the karaoke/plain lyrics that are actually loaded.
     if not s.synced then
       -- unsynced: static list inside a clipping scroll (a bare column does not
-      -- clip its children), dimmed, centered, generous line spacing. The
+      -- clip its children), dimmed, generous line spacing. The
       -- keyboard cursor still highlights a line (no seek — no timestamps).
       local rows = {}
       for i, l in ipairs(lines) do
         local isCursor = (i == cursorLine)
-        -- Build the children list conditionally — a literal
-        -- `cond and node or nil` inside the children array emits a nil
-        -- child, which the host logs as "ui tree node is not a table".
         local rowChildren = {}
         if isCursor then
           rowChildren[#rowChildren + 1] = ui.glyph({
             key = "cur" .. i,
             name = "chevron-right",
-            size = 11,
+            size = 12,
             color = T.lyricActive,
           })
+          rowChildren[#rowChildren + 1] = ui.spacer({ width = 4 })
         end
         rowChildren[#rowChildren + 1] = ui.label({
-          key = "lbl" .. i, text = wrapLyric(l.text, T.fsFarLyric, "normal", isCursor and 16 or 0),
-          fontSize = T.fsFarLyric,
+          key = "lbl" .. i,
+          text = wrapLyric(l.text, T.fsNearLyric, "normal", isCursor and 18 or 0),
+          fontSize = T.fsNearLyric,
           color = isCursor and T.lyricActive or T.lyricNear,
-          opacity = isCursor and 1 or 0.8, textAlign = "center",
+          opacity = isCursor and 1 or 0.75,
+          textAlign = "start",
         })
         rows[#rows + 1] = ui.row({
           key = "lyr" .. i,
-          align = "center", justify = "center",
+          align = "center",
+          justify = "start",
+          paddingH = 14,
+          paddingV = 6,
+          radius = 10,
+          fill = isCursor and "surface_variant/0.3" or nil,
         }, rowChildren)
-        rows[#rows + 1] = ui.spacer({ key = "lgap" .. i, height = T.gapMicro })
+        rows[#rows + 1] = ui.spacer({ key = "lgap" .. i, height = 4 })
       end
       -- The unsynced list is a FILLING body: it must own the whole lyrics area
       -- and scroll inside it. It must NOT be wrapped in the balanced flexGrow
@@ -491,7 +479,7 @@ local function buildLyricsBody(s)
   -- a row needs and shrink the window until its total fits (wrapping long
   -- lines must never push the active line below the panel edge).
   local function sublines(i)
-    return 1 + select(2, wrapLyric(s.lyrics[i].text, fsArr[i], wArr[i], i == cursorLine and 16 or 0):gsub("\n", ""))
+    return 1 + select(2, wrapLyric(s.lyrics[i].text, fsArr[i], wArr[i], i == cursorLine and 18 or 0):gsub("\n", ""))
   end
   -- Karaoke centering: the anchor line (the cursor while the user scrolls,
   -- otherwise the playing line - and before playback starts the first line) is
@@ -511,10 +499,7 @@ local function buildLyricsBody(s)
   local hl = active
   local budget = visibleLines()
   local half = math.floor((budget - 1) / 2)
-  -- edge spacers must match a REAL row's height, measured live (~29 px: a 17 px
-  -- active glyph on its 21 px line box plus the 6 px micro gap) - NOT fs*1.25,
-  -- which under-sized the slot at 27 px and let the block run past the area.
-  local SLOT_H = LYR_ROW_PX
+  local SLOT_H = 32
   -- shrink the side slots if wrapped sub-lines would overflow the area
   while half > 0 do
     local used = 0
@@ -536,54 +521,69 @@ local function buildLyricsBody(s)
       local isActive = (idx == hl)
       local isCursor = (idx == cursorLine)
       local isHover = (idx == hoveredLine)
-      local dist = math.abs(idx - active)
+      local dist = (active >= 1) and math.abs(idx - active) or math.abs(idx - 1)
       local fontSize = (idx == active) and T.fsActiveLyric or fsArr[idx]
       local fontWeight = (idx == hl) and "bold" or wArr[idx]
-      local color = (isActive or isCursor or isHover) and T.lyricActive
-        or (dist <= 2 and T.lyricNear or T.lyricFar)
-      local opacity = (isActive or isCursor or isHover) and 1
-        or (dist <= 2 and 0.9 or (dist <= 5 and 0.55 or 0.3))
+      local color
+      local opacity
+      local fill = nil
+
+      if isActive then
+        color = T.lyricActive
+        opacity = 1.0
+        fill = "primary/0.12"
+      elseif isCursor then
+        color = T.lyricActive
+        opacity = 1.0
+        fill = "surface_variant/0.3"
+      elseif isHover then
+        color = T.lyricActive
+        opacity = 0.85
+      else
+        color = (dist <= 2) and T.lyricNear or T.lyricFar
+        if dist == 1 then
+          opacity = 0.65
+        elseif dist == 2 then
+          opacity = 0.45
+        elseif dist == 3 then
+          opacity = 0.28
+        else
+          opacity = 0.15
+        end
+      end
+
       local lineTime = s.lyrics[idx].time
-      -- Clickable line: ui.label does not accept onClick and ui.button
-      -- ignores color/fontWeight (would break the karaoke gradient), so wrap
-      -- the label in a ui.row that owns the click target. Seek only when the
-      -- line has a timestamp. The cursor row gets a leading chevron marker.
-      -- Hovering a row highlights it by shifting the text colour/opacity only
-      -- (no background fill: the tint lingered after the pointer left the row
-      -- on this host, while colour alone reads as a clean hover and matches the
-      -- active-line treatment).
       local children = {}
       if isCursor then
         children[#children + 1] = ui.glyph({
           key = "cur" .. idx,
           name = "chevron-right",
-          size = math.max(10, fontSize - 3),
+          size = 12,
           color = T.lyricActive,
         })
+        children[#children + 1] = ui.spacer({ width = 4 })
       end
       children[#children + 1] = ui.label({
         key = "lbl" .. idx,
-        text = wrapLyric(s.lyrics[idx].text, fontSize, fontWeight, isCursor and 16 or 0),
+        text = wrapLyric(s.lyrics[idx].text, fontSize, fontWeight, isCursor and 18 or 0),
         fontSize = fontSize,
         fontWeight = fontWeight,
         color = color,
         opacity = opacity,
-        textAlign = "center",
+        textAlign = "start",
       })
       local rowProps = {
         key = "lyr" .. idx,
-        align = "center", justify = "center",
+        align = "center",
+        justify = "start",
+        paddingH = 14,
+        paddingV = 6,
+        radius = 10,
+        fill = fill,
         onClick = (lineTime >= 0) and function() queueSeek(lineTime) end or nil,
-        -- Tooltip (plugin API 32): says the row is a seek target and where it
-        -- lands. On a host below 5.2 the prop is logged and ignored, so this is
-        -- a pure enhancement and does not justify raising plugin_api.
         tooltip = (lineTime >= 0)
           and (noctalia.tr("panel.seek-to") .. " " .. fmtTime(lineTime)) or nil,
       }
-      -- Hover highlight without a crash: NEVER call render() inside onHover —
-      -- re-creating the tree mid-event-dispatch kills the host (plugin got
-      -- disabled). The panel already re-renders ~6x/s on the media watch, so
-      -- hovering only sets a flag and the next watch tick repaints it.
       rowProps.onHover = function(state)
         local want = (state == "true") and idx or 0
         if want ~= hoveredLine then hoveredLine = want end
@@ -624,13 +624,6 @@ end
 
 -- ============================= cover: art + progress =============================
 
--- Cover art with a thin progress line under it. VERIFIED LIVE on this host:
---   * ui.box cannot hold children (host drops them with warnings);
---   * ui.image renders at DECLARED size only when NOT wrapped in a padded
---     container (inside a padded plate column it came out oversize), so the
---     frame is the image's own border (ui.image border/borderWidth/radius);
---   * vertical ui.progress bars do not render at all -> single horizontal
---     native progress bar under the art (agreed auto-fallback).
 local function buildCover(s, coverSize)
   local COVER = coverSize or T.cover
   if s.artUrl and s.artUrl ~= "" then
@@ -641,41 +634,30 @@ local function buildCover(s, coverSize)
       onClick = function() sendCmd("toggle") end,
     })
   else
-    -- no art: show a fallback disc glyph
-    return ui.box({ key = "coverbox", width = COVER, height = COVER,
-      fill = "surface_variant/0.6", border = "outline/0.5", borderWidth = 1,
-      radius = T.coverRadius }, {
-        ui.glyph({ name = "disc", size = math.max(28, COVER - 8), color = "on_surface_variant" }),
-      })
+    return ui.column({
+      key = "coverbox",
+      width = COVER,
+      height = COVER,
+      fill = "surface_variant/0.5",
+      border = "outline/0.25",
+      borderWidth = 1,
+      radius = T.coverRadius,
+      align = "center",
+      justify = "center",
+      onClick = function() sendCmd("toggle") end,
+    }, {
+      ui.glyph({ name = "disc", size = math.max(28, COVER - 16), color = "on_surface_variant" }),
+    })
   end
 end
 
-local function buildProgressBar(s)
+local function buildProgressBar(s, sliderW)
   local total = s.lengthSec or 0
   local cur = interpPos(s)
   local frac = (total > 0) and math.min(1, cur / total) or 0
 
-  -- Seekable slider, the same control the shell's own control-center media tab
-  -- uses (src/shell/control_center/tabs/media_tab.cpp: ui::slider + onValueChanged
-  -- + onDragEnd). This is the canonical route: the host does NOT hand a plugin
-  -- the pointer coordinates of a click, and ui.progress is display-only, but
-  -- ui.slider owns its own pointer handling - drag to scrub, click to jump, and
-  -- the host skips re-applying `value` while the thumb is held. Seeking reuses
-  -- the transport the lyric lines already click through (panel_cmd "seekTo").
   local seekMax = (total > 0) and total or 0.001
-  -- While a queued seek is still landing, keep showing its target rather than
-  -- the not-yet-updated position (see seekPending/seekQueuedAt). Three cases,
-  -- and the LANDED case must clear the pending first:
-  --   landed       -> the player is on (or within tolerance of) the target, so
-  --                   drop the pending and hand the bar back to the live
-  --                   position. This must be the first test: the earlier version
-  --                   required convergence AND the age timeout at the same
-  --                   instant, so once playback ran past the target the first
-  --                   condition became true again and the bar stayed pinned to
-  --                   the target for the rest of the track (the reported freeze);
-  --   too old      -> the player never honoured it; stop forcing the target;
-  --   in flight    -> show the target, not the stale snapshot position.
-  local queued = tonumber(seekPending) or -1   -- host may deliver values as strings
+  local queued = tonumber(seekPending) or -1
   if queued >= 0 then
     local live = tonumber(s.posSec) or 0
     if math.abs(live - queued) <= 0.5 then
@@ -690,66 +672,59 @@ local function buildProgressBar(s)
     end
   end
 
-  -- The host calls setValue() on every render, and setValue fires
-  -- onValueChanged - so a naive onChange receives the value we just painted
-  -- back on every 150 ms snapshot and seeks to it, dragging the track along in
-  -- steps. The reconciler only calls setValue when `value` actually changed, so
-  -- the echo always carries the exact number we rendered; a real interaction
-  -- (click, drag, wheel) carries a different one. Ignore anything that matches
-  -- what we last painted. (The shell's media tab guards the same feedback with
-  -- m_syncingProgress; a plugin cannot set that flag, so it compares values.)
   local painted = frac * seekMax
   local function onScrub(v)
-    -- onChange fires on every move while dragging and once on a plain click.
-    -- The host formats the value with std::format("{}", value), i.e. it arrives
-    -- as a STRING in Luau (despite the docs saying "a number for a slider") -
-    -- coerce it before handing it to the service, which does arithmetic on it.
     local sec = tonumber(v)
     if not sec then return end
-    if math.abs(sec - painted) < 0.5 then return end   -- echo of our own value
-    queueSeek(sec)                 -- hold + send in one place (the host may not
-  end                              -- re-fire onChange, so never rely on it here)
+    if math.abs(sec - painted) < 0.5 then return end
+    queueSeek(sec)
+  end
 
   return ui.slider({
     key = "seek",
-    -- No width prop: a `column` stretches its children across the cross axis
-    -- (FlexAlign::Stretch on the ui.* layer), which is what makes the slider span
-    -- the panel exactly like the old ui.progress did. A string width such as
-    -- "stretch" is NOT parsed (the reconciler reads `width` as a number), and a
-    -- ui.row wrapper would stretch on the wrong axis and leave the slider at the
-    -- host's 180 px sliderDefaultWidth.
+    width = sliderW,
     min = 0, max = seekMax, step = 1,
     value = painted,
     enabled = (s.hasPlayer == true) and (total > 0),
     controlSize = "sm",
     onChange = onScrub,
-    -- the host calls onDragEnd with no value; the last onChange already
-    -- queued the target, so this only marks the interaction as finished.
     onDragEnd = function() seekQueuedAt = nowMs() end,
   })
 end
 
--- ============================= header (cover + info + transport) =============================
+-- ============================= player card =============================
 
-local function buildInfoRow(s)
-  local L = panelLayout()
+local function buildPlayerCard(s, L)
   if not s.hasPlayer then
-    return { ui.row({ key = "noplayer", height = L.cover, align = "center" }, {
-      ui.label({ text = noctalia.tr("panel.no-media-player"), color = T.emptyState, fontSize = T.fsMeta }),
-    }) }
+    return ui.column({
+      key = "playerCardEmpty",
+      fill = "surface_variant/0.25",
+      border = "outline/0.15",
+      borderWidth = 1,
+      radius = 16,
+      padding = 16,
+      align = "center",
+      justify = "center",
+      height = 96,
+    }, {
+      ui.label({
+        text = noctalia.tr("panel.no-media-player"),
+        color = T.emptyState,
+        fontSize = T.fsMeta,
+      }),
+    })
   end
 
   local cover = buildCover(s, L.cover)
 
-  -- `tip` uses the container/button tooltip prop (Noctalia 5.2 / plugin API 32).
-  -- A host older than that logs "has no prop 'tooltip', ignored" and simply shows
-  -- nothing — the prop is cosmetic, so it is NOT worth raising plugin_api for it
-  -- and dropping every user below 5.2 (same feature-detect stance as the store's
-  -- pixel-shift, which calls getColor() with a fallback while staying at API 30).
   local function ctl(glyph, action, enabled, size, tip)
     return ui.button({
-      glyph = glyph, glyphSize = size or L.ctl, variant = "ghost",
-      enabled = enabled ~= false, onClick = function() sendCmd(action) end,
+      glyph = glyph,
+      glyphSize = size or L.ctl,
+      variant = "ghost",
+      controlSize = "sm",
+      enabled = enabled ~= false,
+      onClick = function() sendCmd(action) end,
       tooltip = tip,
     })
   end
@@ -758,39 +733,29 @@ local function buildInfoRow(s)
   local cur = interpPos(s)
   local total = s.lengthSec or 0
 
-  -- right block: transport row (the hero pill sits on the cover's axis) +
-  -- quiet time label underneath, right-aligned
-  local transportCol = ui.column({ key = "transportCol", gap = 2, align = "center", justify = "center" }, {
-    ui.row({ gap = T.gapMicro, align = "center", justify = "end" }, {
-      ctl(glyphFor.prev, "prev", s.canGoPrev ~= false, L.ctl, "Previous track"),
-      ui.button({
-        glyph = mainGlyph, glyphSize = L.main, variant = "primary",
-        enabled = s.hasPlayer == true, onClick = function() sendCmd("toggle") end,
-        controlSize = "sm",
-        tooltip = s.playing and "Pause" or "Play",
-      }),
-      ctl(glyphFor.next, "next", s.canGoNext ~= false, L.ctl, "Next track"),
+  local transportRow = ui.row({
+    key = "transportRow",
+    gap = 4,
+    align = "center",
+    justify = "end",
+  }, {
+    ctl(glyphFor.prev, "prev", s.canGoPrev ~= false, L.ctl, "Previous track"),
+    ui.button({
+      glyph = mainGlyph,
+      glyphSize = L.main,
+      variant = "primary",
+      enabled = s.hasPlayer == true,
+      onClick = function() sendCmd("toggle") end,
+      controlSize = "sm",
+      tooltip = s.playing and "Pause" or "Play",
     }),
-    ui.label({ key = "time", text = fmtTime(cur) .. " / " .. fmtTime(total),
-      fontSize = T.fsTime, color = T.colTime }),
+    ctl(glyphFor.next, "next", s.canGoNext ~= false, L.ctl, "Next track"),
   })
 
-  -- middle block: title + artist - album (no wrap, marquee for overflow).
-  -- PATTERN FROM COMMUNITY/TODO + lyrics.luau: text pinned left inside a
-  -- fixed-width BUTTON (contentAlign = "start"); a line that does not fit is
-  -- NOT ellipsized - it stays static for MARQUEE_HOLD seconds, then scrolls
-  -- char-by-char (charUnits widths), holds at the end, and scrolls back.
-  -- Height never jumps: button height is fixed per line.
-  -- The column takes ALL the width left between the cover gap and the
-  -- transport gap (flexGrow = 1 below) so the title uses the free area instead
-  -- of being clamped to a fixed 168 px slot while a spring idles beside it.
   local TEXT_W = L.textW
-  local MARQUEE_HOLD = 2        -- seconds of static display before scrolling
-  local MARQUEE_SPEED = 24      -- pixels per second
-  -- MPRIS metadata can contain embedded newlines ("Golden Empire feat.\n
-  -- Zitaa - Original Mix"): a button then WRAPS its text to 2 lines inside
-  -- the fixed-height box and the overflow draws over the next line (the
-  -- "наложение букв" the user saw). Sanitize to a single line.
+  local MARQUEE_HOLD = 2
+  local MARQUEE_SPEED = 24
+
   local function singleLine(text)
     text = tostring(text or ""):gsub("[\r\n\t]+", " ")
     text = text:gsub("  +", " ")
@@ -799,25 +764,7 @@ local function buildInfoRow(s)
   local artistLine = singleLine(s.artist ~= "" and s.artist or noctalia.tr("common.unknown-artist"))
   if s.album ~= "" then artistLine = artistLine .. " - " .. s.album end
 
-  -- UTF-8 aware char split + per-char width units (community/lyrics scheme)
-  local function toChars(text)
-    local chars = {}
-    local i = 1
-    while i <= #text do
-      local byte = text:byte(i)
-      local len = 1
-      if byte >= 0xF0 then len = 4 elseif byte >= 0xE0 then len = 3
-      elseif byte >= 0xC0 then len = 2 end
-      chars[#chars + 1] = text:sub(i, i + len - 1)
-      i = i + len
-    end
-    return chars
-  end
   local function charUnits(char)
-    -- Exact per-glyph advance in em - the same measured table wrapLyric uses
-    -- (charAdv). The previous flat 0.72 em/char over-estimated mixed-case
-    -- titles by ~30%, so the marquee window came out far narrower than the
-    -- slot and the title ended in open space (owner: "окно для текста обрезано").
     return charAdv(char)
   end
   local function textUnits(text)
@@ -825,10 +772,6 @@ local function buildInfoRow(s)
     for _, ch in ipairs(toChars(text)) do u = u + charUnits(ch) end
     return u
   end
-  -- viewport capacity in width units, PER FONT SIZE: units are em-fractions
-  -- (charUnits = em fraction), so capacity = usable px / fontSize. The lines now
-  -- render as ui.label (no button chrome), so the full column width is usable -
-  -- the old -26 px reserved button inner padding and left a gap on the right.
   local function vwUnits(fs)
     return TEXT_W / fs
   end
@@ -836,14 +779,9 @@ local function buildInfoRow(s)
     return textUnits(text) > vwUnits(fs)
   end
 
-  -- scroll timing per line: static hold -> slow travel -> hold -> back
-  -- (marqueeState is module-scope — see top of file)
-
   local function marqueeSlice(chars, offset, fs)
-    -- visible window of vwUnits(fs) starting at char offset
     local out, used, i = {}, 0, 1
     local skip = math.floor(offset)
-    local frac = offset - skip
     local index = skip + 1
     while index <= #chars and used < vwUnits(fs) do
       local w = charUnits(chars[index])
@@ -876,8 +814,6 @@ local function buildInfoRow(s)
       end
       local distance = math.max(0, #chars - math.max(1, trailing))
       if distance > 0 then
-        -- scroll speed in units/second: 24px/s at fs13 ≈ 1.85 units/s,
-        -- scaled by fontSize so all lines scroll at the same visual speed
         local cellsPerSec = math.max(0.5, MARQUEE_SPEED / fs)
         local travel = distance / cellsPerSec
         local cycle = MARQUEE_HOLD * 2 + travel * 2
@@ -899,16 +835,6 @@ local function buildInfoRow(s)
         shown = marqueeSlice(chars, math.floor(off), fs)
       end
     end
-    -- key is STABLE (no slice suffix): the node is kept across scroll frames,
-    -- only its text is re-rendered in place. A per-slice key forced a fresh node
-    -- recreation each frame, which re-dirties the surface and makes the compositor
-    -- re-blur it -> visible blink on some GPUs (issue #649 on AMD Barcelo).
-    -- In-place text swaps may briefly overlap glyphs at the marquee edge, but that
-    -- is far less disruptive than the per-frame surface churn.
-    -- Render with ui.label, not ui.button: the column stretches to the free
-    -- width, and a label's textAlign = "start" reliably pins the text to the
-    -- left (a stretched button centred its caption - contentAlign had no
-    -- effect in a panel, so short titles floated in the middle of the slot).
     return ui.label({
       key = key, text = shown, fontSize = fs, fontWeight = weight,
       color = colr, textAlign = "start", maxLines = 1, width = TEXT_W,
@@ -916,23 +842,17 @@ local function buildInfoRow(s)
     })
   end
 
-  -- advance marquee timers between renders (called from update())
-  -- Hovering the title/artist block pauses scrolling: keep the phase frozen
-  -- (do NOT accumulate elapsed) so the marquee does not fast-forward past a
-  -- long hover and resume with a jump.
   tickMarquee = function(deltaSec)
     if marqueePaused then return end
     for _, st in pairs(marqueeState) do st.elapsed = st.elapsed + deltaSec end
   end
+
   local infoCol = ui.column({
-    -- Fixed width (TEXT_W) with align = "start": the column's children stretch
-    -- to that width and are pinned left, so the title starts right after the
-    -- cover. A flexGrow column instead centred its children (flexGrow + start
-    -- on the cross axis conflict) and a start-only column collapsed the label
-    -- to its text, which then centred inside the free space.
-    key = "infoCol", gap = 3, align = "start", width = TEXT_W,
-    -- hover pauses the marquees under the pointer; onHover true is always
-    -- matched by a false, so a hover-away resumes scrolling cleanly.
+    key = "infoCol",
+    gap = 4,
+    align = "start",
+    justify = "center",
+    width = TEXT_W,
     onHover = function(state, key)
       local want = (state == "true")
       if want ~= marqueePaused then
@@ -941,26 +861,58 @@ local function buildInfoRow(s)
     end,
   }, {
     textLine("ttl", singleLine(s.title ~= "" and s.title or noctalia.tr("common.no-title")),
-      T.fsTitle, "semibold", T.colTitle),
+      T.fsTitle, "bold", T.colTitle),
     textLine("art", artistLine, T.fsMeta, "normal", T.colMeta),
   })
 
-  -- single band, everything centered on the art's vertical axis.
-  -- Both inline gaps use the same GAP_PX as the cover-to-text gap, and there is
-  -- no flexGrow spring: the info column stretches, so the header reads with one
-  -- rhythm and the free width lands in the text (not in an empty slot).
-  return {
-    ui.row({ key = "infoRow", align = "center", justify = "start", height = 62 }, {
-      ui.column({ key = "coverWrap", gap = 1, align = "center",
-        width = L.cover + 2 }, {
-          cover,
-        }),
-      ui.spacer({ key = "coverGap", width = L.gapInline }),
+  local topRow = ui.row({
+    key = "cardTopRow",
+    align = "center",
+    justify = "space_between",
+  }, {
+    ui.row({ align = "center", gap = 12 }, {
+      cover,
       infoCol,
-      ui.spacer({ key = "transportGap", width = L.gapInline }),
-      transportCol,
     }),
-  }
+    transportRow,
+  })
+
+  local progressRow = ui.row({
+    key = "cardProgressRow",
+    align = "center",
+    justify = "space_between",
+  }, {
+    ui.label({
+      key = "timeCur",
+      text = fmtTime(cur),
+      fontSize = T.fsTime,
+      color = T.colTime,
+      width = 36,
+      textAlign = "start",
+    }),
+    buildProgressBar(s, L.sliderW),
+    ui.label({
+      key = "timeTot",
+      text = fmtTime(total),
+      fontSize = T.fsTime,
+      color = T.colTime,
+      width = 36,
+      textAlign = "end",
+    }),
+  })
+
+  return ui.column({
+    key = "playerCard",
+    fill = "surface_variant/0.3",
+    border = "outline/0.15",
+    borderWidth = 1,
+    radius = 16,
+    padding = 12,
+    gap = 10,
+  }, {
+    topRow,
+    progressRow,
+  })
 end
 
 -- ============================= render =============================
@@ -971,9 +923,10 @@ local function render()
     playing = false, lengthSec = 0, posSec = 0, lyrics = {},
     lyricsStatus = "loading", lyricsProvider = "", synced = false,
   }
-  local infoRow = buildInfoRow(s)
+  local L = panelLayout()
+  local playerCard = buildPlayerCard(s, L)
 
-  -- footer: provider + mode in one quiet label (empty string hides itself)
+  -- footer: provider + mode badge
   local footerTxt = ""
   if s.lyricsStatus == "ready" or ((s.lyricsStatus == "choose") and #(s.lyrics or {}) > 0) then
     footerTxt = (s.lyricsProvider ~= "" and s.lyricsProvider or "")
@@ -982,58 +935,80 @@ local function render()
   end
 
   panel.render(ui.column({ flexGrow = 1, padding = T.pad, gap = T.gapBand }, {
-    -- A. chrome header: overline left, two ghost glyph buttons right
+    -- A. chrome header: icon + title left, action buttons right
     ui.row({ key = "chrome", align = "center", justify = "space_between" }, {
-      ui.label({ text = noctalia.tr("panel.now-playing"), fontSize = T.fsOverline, fontWeight = "semibold",
-        color = T.colOverline }),
-      ui.row({ gap = T.gapMicro, align = "center" }, {
-        -- "Lyrics variants" button: ALWAYS visible while a track is loaded
-        -- (not only when the chain ended in a "choose" state). Opens the
-        -- variant selector: the service fetches LRCLIB search candidates on
-        -- demand and keeps the playing lyrics untouched until a row is picked.
-        ui.button({ glyph = "list", glyphSize = 14, variant = "ghost", controlSize = "sm",
-          width = 22, height = 22,
+      ui.row({ align = "center", gap = 8 }, {
+        ui.glyph({ name = "music", size = 14, color = T.lyricActive }),
+        ui.label({
+          text = noctalia.tr("panel.now-playing"),
+          fontSize = T.fsOverline,
+          fontWeight = "bold",
+          color = T.colOverline,
+        }),
+      }),
+      ui.row({ gap = 4, align = "center" }, {
+        ui.button({
+          glyph = "list", glyphSize = 14, variant = "ghost", controlSize = "sm",
+          width = 24, height = 24,
           visible = s.hasPlayer == true and (s.title or "") ~= "",
           tooltip = noctalia.tr("panel.choose-lyrics"),
           onClick = function()
             showCandidates = not showCandidates
             if showCandidates then
-              -- (re)open: always ask the service for a fresh candidate list
               noctalia.state.set("panel_req", { action = "openLyricChoices" })
             end
             render()
-          end }),
-        ui.button({ glyph = "refresh", glyphSize = 14, variant = "ghost", controlSize = "sm",
-          width = 22, height = 22,
+          end,
+        }),
+        ui.button({
+          glyph = "refresh", glyphSize = 14, variant = "ghost", controlSize = "sm",
+          width = 24, height = 24,
           tooltip = noctalia.tr("panel.reload-lyrics"),
-          onClick = function() noctalia.state.set("panel_req", { action = "reloadLyrics" }) end }),
-        ui.button({ glyph = "close", glyphSize = 14, variant = "ghost", controlSize = "sm",
-          width = 22, height = 22,
-          onClick = function() panel.close() end }),
+          onClick = function() noctalia.state.set("panel_req", { action = "reloadLyrics" }) end,
+        }),
+        ui.button({
+          glyph = "close", glyphSize = 14, variant = "ghost", controlSize = "sm",
+          width = 24, height = 24,
+          onClick = function() panel.close() end,
+        }),
       }),
     }),
-    -- B. info band (cover | info | transport)
-    infoRow[1],
-    -- progress bar replacing the hairline separator
-    buildProgressBar(s),
-    -- C. lyrics (flexGrow). The block is centred with a balanced flexGrow
-    -- spacer above and below (this host ignored justify = "center" on the
-    -- column, verified live) - so the anchor line sits on the centre line.
+
+    -- B. Player Card (Cover, Info, Controls, Progress + Timestamps)
+    playerCard,
+
+    -- C. lyrics (flexGrow with centering spacers)
     (function()
       local nodes, fills = buildLyricsBody(s)
       local kids = {}
-      -- Centre the karaoke block with balanced flexGrow spacers (this host
-      -- ignored justify = "center" on the column, verified live), but leave a
-      -- FILLING body (the unsynced scroll list) to own the whole area: adding
-      -- spacers there would split the free height three ways.
       if not fills then kids[#kids + 1] = ui.spacer({ key = "lyricsTopFlex", flexGrow = 1 }) end
       for i = 1, #nodes do kids[#kids + 1] = nodes[i] end
       if not fills then kids[#kids + 1] = ui.spacer({ key = "lyricsBotFlex", flexGrow = 1 }) end
-      return ui.column({ key = "lyrics", flexGrow = 1, gap = T.gapMicro }, kids)
+      return ui.column({ key = "lyrics", flexGrow = 1, gap = 4 }, kids)
     end)(),
-    -- D. footer: provider - mode
-    ui.label({ key = "footer", text = footerTxt, fontSize = T.fsOverline,
-      color = T.footer, visible = footerTxt ~= "" }),
+
+    -- D. footer: provider + mode badge
+    (function()
+      if footerTxt == "" then
+        return ui.spacer({ key = "footerEmpty", height = 0, visible = false })
+      end
+      return ui.row({ key = "footerRow", justify = "center", align = "center" }, {
+        ui.row({
+          key = "footerBadge",
+          fill = "surface_variant/0.25",
+          border = "outline/0.15",
+          borderWidth = 1,
+          radius = 12,
+          paddingH = 10,
+          paddingV = 4,
+          align = "center",
+          gap = 6,
+        }, {
+          ui.glyph({ name = s.synced and "sparkles" or "file-text", size = 11, color = T.footer }),
+          ui.label({ text = footerTxt, fontSize = 11, fontWeight = "medium", color = T.footer }),
+        }),
+      })
+    end)(),
   }))
 end
 
