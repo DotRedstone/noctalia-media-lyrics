@@ -998,64 +998,7 @@ render = function()
       for i = 1, #nodes do kids[#kids + 1] = nodes[i] end
       if not fills then kids[#kids + 1] = ui.spacer({ key = "lyricsBotFlex", flexGrow = 1 }) end
       local lyricsCol = ui.column({ key = "lyrics", flexGrow = 1, gap = 4 }, kids)
-      if s.synced and #(s.lyrics or {}) > 1 then
-        local navCol = ui.column({ key = "lyricsNav", justify = "center", align = "center", gap = 8 }, {
-          ui.button({
-            key = "navUp",
-            glyph = "chevron-up",
-            glyphSize = 14,
-            variant = "ghost",
-            controlSize = "sm",
-            width = 24,
-            height = 24,
-            onClick = function() moveCursor(-1) end,
-            tooltip = "上一句 (也可按键盘 ↑)",
-          }),
-          ui.button({
-            key = "navDown",
-            glyph = "chevron-down",
-            glyphSize = 14,
-            variant = "ghost",
-            controlSize = "sm",
-            width = 24,
-            height = 24,
-            onClick = function() moveCursor(1) end,
-            tooltip = "下一句 (也可按键盘 ↓)",
-          }),
-        })
-        return ui.row({ key = "lyricsRow", flexGrow = 1, align = "stretch" }, {
-          lyricsCol,
-          navCol,
-        })
-      end
       return lyricsCol
-    end)(),
-
-    -- C2. browsing indicator: return to live playback button
-    (function()
-      if cursorLine <= 0 or not s.synced then
-        return ui.spacer({ key = "returnSpacer", height = 0, visible = false })
-      end
-      return ui.row({ key = "returnRow", justify = "center", align = "center" }, {
-        ui.button({
-          key = "returnActiveBtn",
-          variant = "primary",
-          controlSize = "sm",
-          text = "回到当前播放 (4s)",
-          glyph = "arrow-back-up",
-          glyphSize = 12,
-          fontSize = 11,
-          radius = 12,
-          paddingH = 12,
-          paddingV = 4,
-          onClick = function()
-            cursorLine = 0
-            lastScrollMs = 0
-            render()
-          end,
-          tooltip = "点击立即返回当前播放歌词行",
-        }),
-      })
     end)(),
 
     -- D. footer: provider + mode badge
